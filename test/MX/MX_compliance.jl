@@ -8,7 +8,7 @@
         @testset "FP8" begin
 
             @testset "E4M3" begin
-                E4M3 = Microfloat(1, 4, 3; variant=:MX)
+                E4M3 = Microfloat(1, 4, 3, :MX)
 
                 @test Microfloats.bias(E4M3) == 7
 
@@ -74,7 +74,7 @@
         @testset "FP6" begin
 
             @testset "E2M3" begin
-                E2M3 = Microfloat(1, 2, 3; variant=:MX)
+                E2M3 = Microfloat(1, 2, 3, :MX)
 
                 @test Microfloats.bias(E2M3) == 1
 
@@ -104,7 +104,7 @@
             end
 
             @testset "E3M2" begin
-                E3M2 = Microfloat(1, 3, 2; variant=:MX)
+                E3M2 = Microfloat(1, 3, 2, :MX)
 
                 @test Microfloats.bias(E3M2) == 3
 
@@ -137,7 +137,7 @@
         @testset "FP4" begin
 
             @testset "E2M1" begin
-                E2M1 = Microfloat(1, 2, 1; variant=:MX)
+                E2M1 = Microfloat(1, 2, 1, :MX)
 
                 @test Microfloats.bias(E2M1) == 1
 
@@ -168,7 +168,7 @@
 
         # arithmetic not yet supported for unsigned microfloats
         @testset "E8M0" begin
-            E8M0 = Microfloat(0, 8, 0; variant=:MX)
+            E8M0 = Microfloat(0, 8, 0, :MX)
 
             @test Microfloats.bias(E8M0) == 127
 

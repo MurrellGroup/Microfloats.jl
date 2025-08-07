@@ -3,12 +3,19 @@ primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
 const SignedMicrofloat = Microfloat{1}
 const UnsignedMicrofloat = Microfloat{0}
 
-function Microfloat(S::Int, E::Int, M::Int; variant::Symbol=:IEEE)
+"""
+    Microfloat(S, E, M, V=:IEEE)
+
+Create a new `Microfloat` type with `S` sign bits, `E` exponent bits, and `M` mantissa bits.
+
+The `V` argument can be set to `:MX` to create a Microscaling Format (MX) type.
+"""
+function Microfloat(S::Int, E::Int, M::Int, V::Symbol=:IEEE)
     S in (0, 1) || throw(ArgumentError("sign bit must be 0 or 1"))
     E >= 0 || throw(ArgumentError("number of exponent bits must be non-negative"))
     M >= 0 || throw(ArgumentError("number of mantissa bits must be non-negative"))
     0 < S + E + M <= 8 || throw(ArgumentError("total number of bits must be between 1 and 8"))
-    Microfloat{S,E,M,variant}
+    return Microfloat{S,E,M,V}
 end
 
 Microfloat{S}(E::Int, M::Int; kws...) where S = Microfloat(S, E, M; kws...)

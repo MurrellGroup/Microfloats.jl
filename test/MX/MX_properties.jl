@@ -1,9 +1,9 @@
-const E4M3 = Microfloat(1, 4, 3; variant=:MX)
-const E5M2 = Microfloat(1, 5, 2; variant=:MX)
-const E3M2 = Microfloat(1, 3, 2; variant=:MX)
-const E2M3 = Microfloat(1, 2, 3; variant=:MX)
-const E2M1 = Microfloat(1, 2, 1; variant=:MX)
-const E8M0 = Microfloat(0, 8, 0; variant=:MX)
+const E4M3 = Microfloat(1, 4, 3, :MX)
+const E5M2 = Microfloat(1, 5, 2, :MX)
+const E3M2 = Microfloat(1, 3, 2, :MX)
+const E2M3 = Microfloat(1, 2, 3, :MX)
+const E2M1 = Microfloat(1, 2, 1, :MX)
+const E8M0 = Microfloat(0, 8, 0, :MX)
 
 uint8(x) = reinterpret(UInt8, x)
 
