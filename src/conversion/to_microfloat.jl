@@ -1,0 +1,77 @@
+e_subnormal(T) = 1 - bias(T) - n_mantissa_bits(T)
+e_normal(T) = 1 - bias(T)
+e_overflow(T) = (2^n_exponent_bits(T) - 2) - bias(T) + 1
+
+function create_base_shifttable(::Type{T}) where {T<:Microfloat}
+
+    basetable = Vector{T}(undef, 512)
+    shifttable = Vector{UInt8}(undef, 512)
+
+    # shift a 0x1 in the exponent bits created by "significand_mask(Float32) + 0x1"
+    # to the first significand bit
+    # e_shift_subnorm is 17 for Float8
+    e_shift_subnorm = n_mantissa_bits(Float32)-(n_mantissa_bits(T)-1)+e_normal(T)-1
+
+    for i = 0:255                               # all possible exponents for Float32
+        e = i - 127                             # subtract Float32 bias
+        if e < e_subnormal(T)                   # Very small numbers map to +- zero
+            basetable[i|0x000+1] = zero(T)
+            basetable[i|0x100+1] = -zero(T)
+            shifttable[i|0x000+1] = n_mantissa_bits(T)+1
+            shifttable[i|0x100+1] = n_mantissa_bits(T)+1
+        elseif e < e_normal(T)                  # Small numbers map to denorms
+            basetable[i|0x000+1] = zero(T)
+            basetable[i|0x100+1] = -zero(T)
+            shifttable[i|0x000+1] = -e+e_shift_subnorm
+            shifttable[i|0x100+1] = -e+e_shift_subnorm
+        elseif e < e_overflow(T)                # Normal numbers just lose precision
+            basetable[i|0x000+1] = reinterpret(T, UInt8((e+bias(T)) << n_mantissa_bits(T)))
+            basetable[i|0x100+1] = reinterpret(T, UInt8(((e+bias(T)) << n_mantissa_bits(T)) | sign_mask(T)))
+            shifttable[i|0x000+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
+            shifttable[i|0x100+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
+        elseif e < 128                          # Large numbers map to Infinity
+            basetable[i|0x000+1] = inf(T)
+            basetable[i|0x100+1] = -inf(T)
+            shifttable[i|0x000+1] = n_mantissa_bits(T)+1
+            shifttable[i|0x100+1] = n_mantissa_bits(T)+1
+        else                                    # Infinity and NaN's stay Infinity and NaN's
+            basetable[i|0x000+1] = inf(T)
+            basetable[i|0x100+1] = -inf(T)
+            shifttable[i|0x000+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
+            shifttable[i|0x100+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
+        end
+    end
+
+    return reinterpret(UInt8, basetable), shifttable
+end
+
+@generated function (::Type{T})(x::Float32) where {S,E,M,T<:Microfloat{S,E,M}}
+    basetable, shifttable = create_base_shifttable(T)
+
+    quote
+        isnan(x) && return nan(T) # TODO retain the significant bits for NaN?
+        f = reinterpret(UInt32, x)
+    
+        # exponent as Int64
+        i = f >> exponent_offset(Float32) + 1
+        @inbounds sh = $shifttable[i]
+        f &= mantissa_mask(Float32)
+    
+        # If `val` is subnormal, the tables are set up to force the
+        # result to 0, so the significand has an implicit `1` in the
+        # cases we care about.
+    
+        f |= mantissa_mask(Float32) + 0x1
+        @inbounds h = ($basetable[i] + (f >> sh) & mantissa_mask(T)) % UInt8
+    
+        # rounding
+        nextbit = (f >> (sh-1)) & 1
+        if nextbit != 0 && (h & exponent_mask(T)) != exponent_mask(T)
+            # Round halfway to even or check lower bits
+            if h&1 == 1 || (f & ((1<<(sh-1))-1)) != 0
+                h += one(UInt8)
+            end
+        end
+        return reinterpret(T, h)
+    end
+end

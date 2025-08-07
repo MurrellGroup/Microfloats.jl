@@ -1,0 +1,1 @@
+Base.isnan(x::T) where T<:UnsignedBoundedMicrofloat{8,0,} = reinterpret(UInt8, x) == 0xff

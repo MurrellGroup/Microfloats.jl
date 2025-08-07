@@ -1,208 +1,94 @@
-primitive type Microfloat{N,E,M,S,OnlyFinite} <: AbstractFloat 8 end
+abstract type Variant end
 
-@inline default_onlyfinite() = false
-@inline default_mantissa(N, E) = N - E - (N != E)
-@inline default_sign(N, E, M) = N - E - M
+abstract type IEEE <: Variant end
 
-@inline default(T::Type{Microfloat{N,E,M,S,OnlyFinite}}) where {N,E,M,S,OnlyFinite} = T
-@inline default(T::Type{Microfloat{N,E,M,S}}) where {N,E,M,S} = T{default_onlyfinite()}
-@inline default(T::Type{Microfloat{N,E,M}}) where {N,E,M} = default(T{default_sign(N,E,M)})
-@inline default(T::Type{Microfloat{N,E}}) where {N,E} = default(T{default_mantissa(N,E)})
+abstract type Microfloat{S,E,M,V} <: AbstractFloat end
 
-const SignlessMicrofloat{N,E,M} = Microfloat{N,E,M,0}
-@inline default(T::Type{SignlessMicrofloat{N,E}}) where {N,E} = default(T{N-E})
+const SignedMicrofloat = Microfloat{1}
+const UnsignedMicrofloat = Microfloat{0}
 
-const FiniteMicrofloat{N,E,M,S} = Microfloat{N,E,M,S,true}
-@inline default(T::Type{FiniteMicrofloat{N,E,M}}) where {N,E,M} = default(T{default_sign(N,E,M)})
-@inline default(T::Type{FiniteMicrofloat{N,E}}) where {N,E} = default(T{default_mantissa(N,E)})
+primitive type StandardMicrofloat{S,E,M,V} <: Microfloat{S,E,M,V} 8 end
 
-(T::Type{<:Number})(x::Microfloat) = T(Float32(x))
-(T::Type{<:Microfloat})(x::Number) = T(Float32(x))
+const SignedStandardMicrofloat = StandardMicrofloat{1}
+const UnsignedStandardMicrofloat = StandardMicrofloat{0}
 
-@inline function (T::Type{<:Microfloat})(x)
-    new_T = default(T)
-    T == new_T && throw(MethodError(T, (x,)))
-    new_T(x)
+primitive type BoundedMicrofloat{S,E,M,V} <: Microfloat{S,E,M,V} 8 end
+
+const SignedBoundedMicrofloat = BoundedMicrofloat{1}
+const UnsignedBoundedMicrofloat = BoundedMicrofloat{0}
+
+function Microfloat(S::Int, E::Int, M::Int; bounded::Bool=false, variant::Type{<:Variant}=IEEE)
+    S in (0, 1) || throw(ArgumentError("sign bit must be 0 or 1"))
+    E >= 0 || throw(ArgumentError("number of exponent bits must be non-negative"))
+    M >= 0 || throw(ArgumentError("number of mantissa bits must be non-negative"))
+    0 < S + E + M <= 8 || throw(ArgumentError("total number of bits must be between 1 and 8"))
+    V = variant
+    bounded ? BoundedMicrofloat{S,E,M,V} : StandardMicrofloat{S,E,M,V}
 end
 
-@inline _reinterpret(T, x) = reinterpret(T, x)
-@inline _reinterpret(T::Type{<:Microfloat}, x) = reinterpret(default(T), x)
+Microfloat{S}(E::Int, M::Int; bounded::Bool=false) where S = Microfloat(S, E, M; bounded)
 
-@inline Microfloat{N,E,M,S}(x::Number) where {N,E,M,S} = Microfloat{N,E,M,S,false}(x)
-@inline Microfloat{N,E,M}(x::Number) where {N,E,M} = Microfloat{N,E,M,N-E-M}(x)
-@inline Microfloat{N,E}(x::Number) where {N,E} = Microfloat{N,E,default_mantissa(N,E)}(x)
+include("utils.jl")
 
-@inline n_bits(::Type{<:Microfloat{N}}) where N = N
-@inline n_padding_bits(::Type{<:Microfloat{N}}) where N = 8 - N
-@inline n_exponent_bits(::Type{<:Microfloat{N,E}}) where {N,E} = E
-@inline n_mantissa_bits(::Type{<:Microfloat{N,E}}) where {N,E} = default_mantissa(N, E)
-@inline n_mantissa_bits(::Type{<:Microfloat{N,E,M}}) where {N,E,M} = M
-@inline n_sign_bits(::Type{<:Microfloat{N,E,M}}) where {N,E,M} = default_sign(N, E, M)
-@inline n_sign_bits(::Type{<:Microfloat{N,E,M,S}}) where {N,E,M,S} = S
+Base.hash(x::Microfloat, h::UInt) = hash(Float32(x), h)
 
-@inline mantissa_offset(T::Type{<:Microfloat}) = n_padding_bits(T)
-@inline exponent_offset(T::Type{<:Microfloat}) = n_mantissa_bits(T) + n_padding_bits(T)
+inf(::Type{T}) where T<:Microfloat = reinterpret(T, exponent_mask(T))
+nan(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) + 1) << (exponent_offset(T) - has_mantissa(T)))
 
-@inline bit_ones(N, T=UInt8) = (one(T) << N) - one(T)
+Base.isinf(x::T) where T<:Microfloat = x === inf(T)
+Base.isnan(x::T) where T<:Microfloat = only_exponent(x) === exponent_mask(T) && !iszero(only_mantissa(x))
 
-sign_mask(T::Type{<:Microfloat}) = bit_ones(n_sign_bits(T)) << 7
-not_sign_mask(T::Type{<:Microfloat}) = bit_ones(n_bits(T) - n_sign_bits(T)) << mantissa_offset(T)
-exponent_mask(T::Type{<:Microfloat}) = bit_ones(n_exponent_bits(T)) << exponent_offset(T)
-mantissa_mask(T::Type{<:Microfloat}) = bit_ones(n_mantissa_bits(T)) << mantissa_offset(T)
+Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
+Base.one(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << exponent_offset(T))
 
-sign_mask(::Type{Float32}) = 0x8000_0000
-exponent_mask(::Type{Float32}) = 0x7f80_0000
-mantissa_mask(::Type{Float32}) = 0x007f_ffff
+Base.eps(x::Microfloat) = max(x-prevfloat(x), nextfloat(x)-x)
+Base.eps(T::Type{<:Microfloat}) = eps(one(T))
 
-eps(x::Microfloat) = max(x-prevfloat(x), nextfloat(x)-x)
-eps(T::Type{<:Microfloat}) = eps(one(T))
+Base.floatmin(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(1) << exponent_offset(T))
+Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << (exponent_offset(T) + 1) | mantissa_mask(T))
 
-_onlyfinite(::Type{<:Microfloat{N,E,M,S,OnlyFinite}}) where {N,E,M,S,OnlyFinite} = OnlyFinite
+Base.typemin(::Type{T}) where T<:Microfloat = -inf(T)
+Base.typemin(::Type{T}) where T<:UnsignedMicrofloat = zero(T)
+Base.typemin(::Type{T}) where T<:BoundedMicrofloat = -floatmax(T)
+Base.typemin(::Type{T}) where T<:UnsignedBoundedMicrofloat = zero(T)
 
-_has_mantissa(T::Type{<:Microfloat}) = n_mantissa_bits(T) > 0
+Base.typemax(::Type{T}) where T<:Microfloat = inf(T)
+Base.typemax(::Type{T}) where T<:BoundedMicrofloat = floatmax(T)
 
-@inline function _bits_inf(::Type{T}) where T<:Microfloat
-    if _onlyfinite(T)               # finite-only formats (e.g. MX-FP4)
-        return bit_ones(n_exponent_bits(T)-1) << (exponent_offset(T)+1) |
-               mantissa_mask(T)   # → saturate to typemax
-    else
-        return bit_ones(n_exponent_bits(T)) << exponent_offset(T)
-    end
-end
+Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(UInt8, x) & ~sign_mask(T))
+Base.iszero(x::T) where T<:Microfloat = abs(x) === zero(T)
+Base.:(-)(x::T) where T<:Microfloat = reinterpret(T, sign_mask(T) ⊻ reinterpret(UInt8, x))
+Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
-@inline function _bits_nan(::Type{T}) where T<:Microfloat
-    if !_has_mantissa(T) || _onlyfinite(T)
-        return _bits_inf(T)       # NaN impossible → fall back to Inf
-    else
-        return _bits_inf(T) |      # all-ones exponent
-               (one(UInt8) << mantissa_offset(T))  # set quiet-NaN bit
-    end
-end
+# https://github.com/JuliaLang/julia/blob/46c2a5c7e1f970e83b408b6ddcba49aaa31d8329/base/float.jl#L799-L801
+Base._precision_with_base_2(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
 
-@inline inf(T::Type{<:Microfloat}) = _reinterpret(T, _bits_inf(T))
-@inline nan(T::Type{<:Microfloat}) = _reinterpret(T, _bits_nan(T))
+Base.signbit(x::Microfloat) = x !== abs(x)
+Base.sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
 
-@inline isinf(x::Microfloat) = (reinterpret(UInt8,x) & exponent_mask(typeof(x))) ==
-                               exponent_mask(typeof(x)) &&
-                               (reinterpret(UInt8,x) & mantissa_mask(typeof(x))) == 0
+Base.round(x::Microfloat, r::RoundingMode) = reinterpret(typeof(x), round(Float32(x), r))
 
-@inline isnan(x::Microfloat) = (reinterpret(UInt8,x) & exponent_mask(typeof(x))) ==
-                               exponent_mask(typeof(x)) &&
-                               (reinterpret(UInt8,x) & mantissa_mask(typeof(x))) != 0
-
-floatmin(T::Type{<:Microfloat}) = _reinterpret(T, bit_ones(1) << exponent_offset(T))
-floatmax(T::Type{<:Microfloat}) = _reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << (exponent_offset(T) + 1) | mantissa_mask(T))
-
-typemin(T::Type{<:Microfloat}) = -inf(T)
-typemax(T::Type{<:Microfloat}) = inf(T)
-
-typemin(T::Type{<:SignlessMicrofloat}) = floatmin(T)
-typemin(T::Type{<:FiniteMicrofloat}) = floatmin(T)
-typemax(T::Type{<:FiniteMicrofloat}) = floatmax(T)
-
-one(T::Type{<:Microfloat}) = _reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << exponent_offset(T))
-zero(T::Type{<:Microfloat}) = _reinterpret(T, 0x00)
-
-one(x::Microfloat) = one(typeof(x))
-zero(x::Microfloat) = zero(typeof(x))
-
-iszero(x::Microfloat) = x == zero(typeof(x))
--(x::Microfloat) = reinterpret(typeof(x), sign_mask(typeof(x)) ⊻ reinterpret(UInt8, x))
-Bool(x::Microfloat) = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
-
-abs(x::Microfloat) = reinterpret(typeof(x), reinterpret(UInt8, x) & ~sign_mask(typeof(x)))
-
-precision(x::Type{<:Microfloat}) = n_mantissa_bits(x)
-
-signbit(x::Microfloat) = reinterpret(UInt8, x) > ~sign_mask(typeof(x))
-sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
-
-first_mantissa_bit_mask(T::Type{<:Microfloat}) = one(UInt32) << (exponent_offset(T) - 1)
-
-mantissa_bit_shift(T::Type{<:Microfloat}) = 23 - n_mantissa_bits(T)
-
-bias(T::Type{<:Microfloat}) = UInt32(2^(n_exponent_bits(T) - 1) - 1)
-bias_difference(T::Type{<:Microfloat}) = UInt32(127 - bias(T))
-
-exp_bits_all_one(T::Type{<:Microfloat}) = bit_ones(n_exponent_bits(T), UInt32)
-
-round(x::Microfloat, r::RoundingMode) = reinterpret(typeof(x), round(Float32(x), r))
-
-function ==(x::T, y::T) where T<:Microfloat
-    if isnan(x) || isnan(y)     # Alternatively, For Float16: (ix|iy)&0x7fff > 0x7c00
-        return false
-    end
-    return reinterpret(UInt8, x) == reinterpret(UInt8, y)
-end
-
-for op in (:<, :<=, :isless)
-    @eval ($op)(a::Microfloat, b::Real) = ($op)(Float32(a), Float32(b))
-    @eval ($op)(a::Real, b::Microfloat) = ($op)(Float32(a), Float32(b))
-    @eval ($op)(a::Microfloat, b::Microfloat) = ($op)(Float32(a), Float32(b))
-end
-
-for op in (:+, :-, :*, :/, :\, :^)
-    @eval ($op)(a::Microfloat, b::Number) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
-    @eval ($op)(a::Number, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
-    @eval ($op)(a::Microfloat, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
-end
-
-for func in (:sin,:cos,:tan,:asin,:acos,:atan,:sinh,:cosh,:tanh,:asinh,:acosh,
-    :atanh,:exp,:exp2,:exp10,:expm1,:log,:log2,:log10,:sqrt,:cbrt,:log1p)
-    @eval $func(a::T) where T<:Microfloat = T($func(Float32(a)))
-end
-
-for func in (:atan,:hypot)
-    @eval $func(a::T, b::T) where T<:Microfloat = T($func(Float32(a),Float32(b)))
-end
-
-for func in (:frexp,:ldexp)
-    @eval $func(a::T, b::Int) where T<:Microfloat = T($func(Float32(a),b))
-end
-
-for func in (:modf,:mod2pi)
-    @eval $func(a::T) where T<:Microfloat = T($func(Float32(a)))
-end
-
-function Base.show(io::IO, x::T) where T <: Microfloat
-    if isnan(x)
-        print(io, T, "(NaN32)")
-    elseif isinf(x)
-        # use the format-specific sign mask
-        if n_sign_bits(T) > 0 && (reinterpret(UInt8, x) & sign_mask(T)) != 0
-            print(io, T, "(-Inf32)")
-        else
-            print(io, T, "(Inf32)")
-        end
-    else
-        io2 = IOBuffer()
-        print(io2, repr(Float32(x)))
-        f = String(take!(io2))
-        print(io, T, "("*f*")")
-    end
-end
-
-function nextfloat(x::T) where T<:Microfloat
-    if isnan(x) || x == inf(T)
+function Base.nextfloat(x::T) where T<:SignedStandardMicrofloat
+    if isnan(x) || x === inf(T)
         return x
-    elseif x == -zero(T)
-        return reinterpret(T, 0x01)
-    elseif UInt8(x) < 0x80  # positive numbers
-        return reinterpret(T, reinterpret(UInt8, x) + 0x01)
-    else                    # negative numbers
-        return reinterpret(T, reinterpret(UInt8, x) - 0x01)
+    elseif iszero(x)
+        return reinterpret(T, bit_ones(1) << mantissa_offset(T))
+    elseif ispositive(x)
+        return reinterpret(T, reinterpret(UInt8, x) + bit_ones(1) << mantissa_offset(T))
+    else
+        return reinterpret(T, reinterpret(UInt8, x) - bit_ones(1) << mantissa_offset(T))
     end
 end
 
-function prevfloat(x::T) where T<:Microfloat
-    if isnan(x) || x == -inf(T)
+function Base.prevfloat(x::T) where T<:SignedStandardMicrofloat
+    if isnan(x) || x === -inf(T)
         return x
-    elseif x == zero(T)
-        return reinterpret(T, 0x81)
-    elseif reinterpret(UInt8, x) < 0x80
-        return reinterpret(T, reinterpret(UInt8, x) - 0x01)
+    elseif iszero(x)
+        return reinterpret(T, sign_mask(T) | (bit_ones(1) << mantissa_offset(T)))
+    elseif ispositive(x)
+        return reinterpret(T, reinterpret(UInt8, x) - bit_ones(1) << mantissa_offset(T))
     else
-        return reinterpret(T, reinterpret(UInt8, x) + 0x01)
+        return reinterpret(T, reinterpret(UInt8, x) + bit_ones(1) << mantissa_offset(T))
     end
 end
 
@@ -210,3 +96,16 @@ Base.promote_rule(::Type{<:Microfloat},::Type{Float16}) = Float16
 Base.promote_rule(::Type{<:Microfloat},::Type{Float32}) = Float32
 Base.promote_rule(::Type{<:Microfloat},::Type{Float64}) = Float64
 Base.promote_rule(T::Type{<:Microfloat},::Type{<:Integer}) = T
+
+# make work with other types
+# reduce branching
+function Base.:(==)(x::T, y::T) where T<:Microfloat
+    isnan(x) || isnan(y) && return false     # Alternatively, For Float16: (ix|iy)&0x7fff > 0x7c00
+    iszero(x) && iszero(y) && return true
+    return x === y
+end
+
+#=
+hasinf(::AbstractFloat) = true
+hasinf(::BoundedMicrofloat) = false
+=#
