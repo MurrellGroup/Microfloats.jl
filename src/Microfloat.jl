@@ -46,7 +46,7 @@ Base.:(-)(x::T) where T<:Microfloat = reinterpret(T, sign_mask(T) ⊻ reinterpre
 Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
 # https://github.com/JuliaLang/julia/blob/46c2a5c7e1f970e83b408b6ddcba49aaa31d8329/base/float.jl#L799-L801
-Base._precision_with_base_2(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
+Base.precision(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
 
 Base.signbit(x::Microfloat) = x !== abs(x)
 Base.sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
