@@ -1,12 +1,12 @@
 module Microfloats
 
+include("float-bits.jl")
+
 include("Microfloat.jl")
 export Microfloat
 export SignedMicrofloat, UnsignedMicrofloat
-export SignedStandardMicrofloat, UnsignedStandardMicrofloat
-export SignedBoundedMicrofloat, UnsignedBoundedMicrofloat
 
-include("MX.jl")
+include("MX/MX.jl")
 
 include("conversion/conversion.jl")
 

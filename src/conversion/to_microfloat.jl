@@ -25,8 +25,9 @@ function create_base_shifttable(::Type{T}) where {T<:Microfloat}
             shifttable[i|0x000+1] = -e+e_shift_subnorm
             shifttable[i|0x100+1] = -e+e_shift_subnorm
         elseif e < e_overflow(T)                # Normal numbers just lose precision
-            basetable[i|0x000+1] = reinterpret(T, UInt8((e+bias(T)) << n_mantissa_bits(T)))
-            basetable[i|0x100+1] = reinterpret(T, UInt8(((e+bias(T)) << n_mantissa_bits(T)) | sign_mask(T)))
+            basebits = (e + Int(bias(T))) << exponent_offset(T)
+            basetable[i|0x000+1] = reinterpret(T, UInt8(basebits))
+            basetable[i|0x100+1] = reinterpret(T, UInt8(basebits | Int(sign_mask(T))))
             shifttable[i|0x000+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
             shifttable[i|0x100+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
         elseif e < 128                          # Large numbers map to Infinity
@@ -52,8 +53,8 @@ end
         isnan(x) && return nan(T) # TODO retain the significant bits for NaN?
         f = reinterpret(UInt32, x)
     
-        # exponent as Int64
-        i = f >> exponent_offset(Float32) + 1
+        # exponent+sign index into 512-entry tables (9 bits), 1-based
+        i = (f >> exponent_offset(Float32)) + 1
         @inbounds sh = $shifttable[i]
         f &= mantissa_mask(Float32)
     
@@ -62,14 +63,17 @@ end
         # cases we care about.
     
         f |= mantissa_mask(Float32) + 0x1
-        @inbounds h = ($basetable[i] + (f >> sh) & mantissa_mask(T)) % UInt8
+        m = UInt8(((f >> sh) & UInt32(right_aligned_mantissa_mask(T))) << mantissa_offset(T))
+        @inbounds h = ($basetable[i] + m) % UInt8
     
         # rounding
         nextbit = (f >> (sh-1)) & 1
         if nextbit != 0 && (h & exponent_mask(T)) != exponent_mask(T)
-            # Round halfway to even or check lower bits
-            if h&1 == 1 || (f & ((1<<(sh-1))-1)) != 0
-                h += one(UInt8)
+            # Round half to even on mantissa LSB, considering mantissa_offset
+            mantissa_lsb_is_one = ((h >> mantissa_offset(T)) & 0x01) == 0x01
+            lower_bits_nonzero = (f & ((UInt32(1) << (sh-1)) - 1)) != 0
+            if mantissa_lsb_is_one || lower_bits_nonzero
+                h = h + (UInt8(1) << mantissa_offset(T))
             end
         end
         return reinterpret(T, h)

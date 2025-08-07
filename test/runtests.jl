@@ -1,12 +1,12 @@
 using Microfloats
 using Test
 
+a ≡ b = isnan(a) || isnan(b) ? true : a == b
+
 @testset "Microfloats" begin
 
-    #include("test_standard.jl")
-    #include("test_bounded.jl")
-
-    include("verify_MX_compliance.jl")
-    #include("verify_Float8s_parity.jl")
+    include("MX_compliance.jl")
+    include("MX_properties.jl")
+    include("Float8s_parity.jl")
 
 end

@@ -1,34 +1,22 @@
-abstract type Variant end
-
-abstract type IEEE <: Variant end
-
-abstract type Microfloat{S,E,M,V} <: AbstractFloat end
+primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
 
 const SignedMicrofloat = Microfloat{1}
 const UnsignedMicrofloat = Microfloat{0}
 
-primitive type StandardMicrofloat{S,E,M,V} <: Microfloat{S,E,M,V} 8 end
-
-const SignedStandardMicrofloat = StandardMicrofloat{1}
-const UnsignedStandardMicrofloat = StandardMicrofloat{0}
-
-primitive type BoundedMicrofloat{S,E,M,V} <: Microfloat{S,E,M,V} 8 end
-
-const SignedBoundedMicrofloat = BoundedMicrofloat{1}
-const UnsignedBoundedMicrofloat = BoundedMicrofloat{0}
-
-function Microfloat(S::Int, E::Int, M::Int; bounded::Bool=false, variant::Type{<:Variant}=IEEE)
+function Microfloat(S::Int, E::Int, M::Int; variant::Symbol=:IEEE)
     S in (0, 1) || throw(ArgumentError("sign bit must be 0 or 1"))
     E >= 0 || throw(ArgumentError("number of exponent bits must be non-negative"))
     M >= 0 || throw(ArgumentError("number of mantissa bits must be non-negative"))
     0 < S + E + M <= 8 || throw(ArgumentError("total number of bits must be between 1 and 8"))
-    V = variant
-    bounded ? BoundedMicrofloat{S,E,M,V} : StandardMicrofloat{S,E,M,V}
+    Microfloat{S,E,M,variant}
 end
 
-Microfloat{S}(E::Int, M::Int; bounded::Bool=false) where S = Microfloat(S, E, M; bounded)
+Microfloat{S}(E::Int, M::Int; kws...) where S = Microfloat(S, E, M; kws...)
 
-include("utils.jl")
+uint(::Type{T}) where T<:Microfloat = UInt8
+n_sign_bits(::Type{T}) where {S,T<:Microfloat{S}} = S
+n_exponent_bits(::Type{T}) where {E,T<:Microfloat{<:Any,E}} = E
+n_mantissa_bits(::Type{T}) where {M,T<:Microfloat{<:Any,<:Any,M}} = M
 
 Base.hash(x::Microfloat, h::UInt) = hash(Float32(x), h)
 
@@ -49,11 +37,8 @@ Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponen
 
 Base.typemin(::Type{T}) where T<:Microfloat = -inf(T)
 Base.typemin(::Type{T}) where T<:UnsignedMicrofloat = zero(T)
-Base.typemin(::Type{T}) where T<:BoundedMicrofloat = -floatmax(T)
-Base.typemin(::Type{T}) where T<:UnsignedBoundedMicrofloat = zero(T)
 
 Base.typemax(::Type{T}) where T<:Microfloat = inf(T)
-Base.typemax(::Type{T}) where T<:BoundedMicrofloat = floatmax(T)
 
 Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(UInt8, x) & ~sign_mask(T))
 Base.iszero(x::T) where T<:Microfloat = abs(x) === zero(T)
@@ -68,7 +53,7 @@ Base.sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -
 
 Base.round(x::Microfloat, r::RoundingMode) = reinterpret(typeof(x), round(Float32(x), r))
 
-function Base.nextfloat(x::T) where T<:SignedStandardMicrofloat
+function Base.nextfloat(x::T) where T<:Microfloat
     if isnan(x) || x === inf(T)
         return x
     elseif iszero(x)
@@ -80,7 +65,7 @@ function Base.nextfloat(x::T) where T<:SignedStandardMicrofloat
     end
 end
 
-function Base.prevfloat(x::T) where T<:SignedStandardMicrofloat
+function Base.prevfloat(x::T) where T<:Microfloat
     if isnan(x) || x === -inf(T)
         return x
     elseif iszero(x)
@@ -100,12 +85,7 @@ Base.promote_rule(T::Type{<:Microfloat},::Type{<:Integer}) = T
 # make work with other types
 # reduce branching
 function Base.:(==)(x::T, y::T) where T<:Microfloat
-    isnan(x) || isnan(y) && return false     # Alternatively, For Float16: (ix|iy)&0x7fff > 0x7c00
-    iszero(x) && iszero(y) && return true
+    (isnan(x) || isnan(y)) && return false
+    (iszero(x) && iszero(y)) && return true
     return x === y
 end
-
-#=
-hasinf(::AbstractFloat) = true
-hasinf(::BoundedMicrofloat) = false
-=#

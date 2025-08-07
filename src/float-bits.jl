@@ -1,12 +1,19 @@
-uint(::Type{T}) where T<:Microfloat = UInt8
+n_sign_bits(::Type{<:AbstractFloat}) = 1
+
+n_exponent_bits(::Type{Float16}) = 5
+n_exponent_bits(::Type{Float32}) = 8
+n_exponent_bits(::Type{Float64}) = 11
+
+n_mantissa_bits(::Type{Float16}) = 10
+n_mantissa_bits(::Type{Float32}) = 23
+n_mantissa_bits(::Type{Float64}) = 52
+
+uint(::Type{Float16}) = UInt16
+uint(::Type{Float32}) = UInt32
+uint(::Type{Float64}) = UInt64
 uint(::Type{T}) where T<:Unsigned = T
 as_uint(x::T) where T<:AbstractFloat = reinterpret(uint(T), x)
-
 bit_ones(N, T=UInt8) = (one(uint(T)) << N) - one(uint(T))
-
-n_sign_bits(::Type{T}) where {S,T<:Microfloat{S}} = S
-n_exponent_bits(::Type{T}) where {E,T<:Microfloat{<:Any,E}} = E
-n_mantissa_bits(::Type{T}) where {M,T<:Microfloat{<:Any,<:Any,M}} = M
 
 n_total_bits(::Type{T}) where T<:AbstractFloat = sizeof(T) * 8
 n_utilized_bits(::Type{T}) where T<:AbstractFloat = n_sign_bits(T) + n_exponent_bits(T) + n_mantissa_bits(T)
@@ -37,24 +44,5 @@ has_sign(::Type{T}) where T<:AbstractFloat = n_sign_bits(T) > 0
 has_exponent(::Type{T}) where T<:AbstractFloat = n_exponent_bits(T) > 0
 has_mantissa(::Type{T}) where T<:AbstractFloat = n_mantissa_bits(T) > 0
 
-isbounded(::Type{T}) where T<:AbstractFloat = T <: BoundedMicrofloat
-
 ispositive(x::T) where T<:AbstractFloat = as_uint(x) & sign_mask(T) === zero(uint(T))
 isnegative(x::T) where T<:AbstractFloat = as_uint(x) & sign_mask(T) !== zero(uint(T))
-
-
-# base interop
-
-uint(::Type{Float16}) = UInt16
-uint(::Type{Float32}) = UInt32
-uint(::Type{Float64}) = UInt64
-
-n_sign_bits(::Type{<:AbstractFloat}) = 1
-
-n_exponent_bits(::Type{Float16}) = 5
-n_exponent_bits(::Type{Float32}) = 8
-n_exponent_bits(::Type{Float64}) = 11
-
-n_mantissa_bits(::Type{Float16}) = 10
-n_mantissa_bits(::Type{Float32}) = 23
-n_mantissa_bits(::Type{Float64}) = 52

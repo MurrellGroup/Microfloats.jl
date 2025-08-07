@@ -15,6 +15,8 @@ for op in (:+, :-, :*, :/, :\, :^)
     @eval ($op)(a::Microfloat, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
 end
 
+(^)(a::T, b::Integer) where T<:Microfloat = T(Float32(a)^b)
+
 
 import Base: sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh,
              atanh, exp, exp2, exp10, expm1, log, log2, log10, sqrt, cbrt, log1p
