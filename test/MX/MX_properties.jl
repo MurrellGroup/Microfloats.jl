@@ -94,12 +94,10 @@ end
                 @test T(-Inf32) == -fmax
             end
             # NaN maps to sentinel for E4M3/E8M0, else saturates to floatmax
-            tnan = T(NaN32)
             if T <: Union{E4M3, E5M2, E8M0}
-                @test isnan(tnan)
+                @test isnan(T(NaN32))
             else
-                @test !isnan(tnan)
-                @test tnan == fmax
+                @test_throws DomainError T(NaN32)
             end
             # Values just beyond floatmax saturate
             big = nextfloat(Float32(fmax))

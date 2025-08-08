@@ -2,17 +2,12 @@ first_mantissa_bit_mask(::Type{T}) where T<:Microfloat = one(UInt32) << (n_manti
 mantissa_bit_shift(::Type{T}) where T<:Microfloat = 23 - n_mantissa_bits(T)
 exp_bits_all_one(::Type{T}) where T<:Microfloat = UInt32(right_aligned_exponent_mask(T))
 
-_float32_injection(x) = nothing
-
-@inline function _float32(x::T) where T<:Microfloat
-    early_return_value = _float32_injection(x)
-    isnothing(early_return_value) || return early_return_value
-
+function _float32(x::T) where T<:Microfloat
     sgn = UInt32(right_aligned_sign(x))
     exp = UInt32(right_aligned_exponent(x))
     mnt = UInt32(right_aligned_mantissa(x))
 
-    if exp == 0              # subnormals & zeros
+    if exp == 0
         if mnt == 0
             return reinterpret(Float32, sgn << 31)
         else
@@ -22,11 +17,9 @@ _float32_injection(x) = nothing
                 n_bit += 1
                 bit   >>= 1
             end
-    
             sgn = sgn << 31
             exp = ((bias_difference(T) + 1 - n_bit) << 23) % UInt32
             mnt = ((mnt & (~bit)) << n_bit) << mantissa_bit_shift(T)
-    
             return reinterpret(Float32, sgn | exp | mnt)
         end
     elseif exp == exp_bits_all_one(T)

@@ -8,11 +8,13 @@ const UnsignedMicrofloat = Microfloat{0}
 
 Create a new `Microfloat` type with `S` sign bits, `E` exponent bits, and `M` mantissa bits.
 
+This "type constructor" ensures that the resulting type is legal.
+
 The `V` argument can be set to `:MX` to create a Microscaling Format (MX) type.
 """
 function Microfloat(S::Int, E::Int, M::Int, V::Symbol=:IEEE)
     S in (0, 1) || throw(ArgumentError("sign bit must be 0 or 1"))
-    E >= 0 || throw(ArgumentError("number of exponent bits must be non-negative"))
+    E >= 1 || throw(ArgumentError("number of exponent bits must be non-negative"))
     M >= 0 || throw(ArgumentError("number of mantissa bits must be non-negative"))
     0 < S + E + M <= 8 || throw(ArgumentError("total number of bits must be between 1 and 8"))
     return Microfloat{S,E,M,V}
@@ -28,7 +30,9 @@ n_mantissa_bits(::Type{T}) where {M,T<:Microfloat{<:Any,<:Any,M}} = M
 Base.hash(x::Microfloat, h::UInt) = hash(Float32(x), h)
 
 inf(::Type{T}) where T<:Microfloat = reinterpret(T, exponent_mask(T))
-nan(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) + 1) << (exponent_offset(T) - has_mantissa(T)))
+nan(::Type{T}) where T<:Microfloat = has_mantissa(T) ?
+    reinterpret(T, exponent_mask(T) | (bit_ones(1, uint(T)) << mantissa_offset(T))) :
+    throw(DomainError(T, "$T has no NaN values"))
 
 Base.isinf(x::T) where T<:Microfloat = x === inf(T)
 Base.isnan(x::T) where T<:Microfloat = only_exponent(x) === exponent_mask(T) && !iszero(only_mantissa(x))
@@ -57,10 +61,12 @@ Base.precision(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
 Base.signbit(x::Microfloat) = x !== abs(x)
 Base.sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
 
-Base.round(x::Microfloat, r::RoundingMode) = reinterpret(typeof(x), round(Float32(x), r))
+Base.round(x::T, r::RoundingMode) where T<:Microfloat = T(round(Float32(x), r))
 
 function Base.nextfloat(x::T) where T<:Microfloat
-    if isnan(x) || x === inf(T)
+    if isnan(x)
+        return x
+    elseif isinf(x)
         return x
     elseif x === -inf(T)
         return -floatmax(T)
@@ -78,7 +84,7 @@ function Base.prevfloat(x::T) where T<:Microfloat
         return x
     elseif x === inf(T)
         return floatmax(T)
-    elseif x === -inf(T) # need this to be after inf(T) for unsigned types
+    elseif x === -inf(T) # this needs to be after +Inf check for unsigned types to work
         return x
     elseif iszero(x)
         return reinterpret(T, sign_mask(T) | (bit_ones(1) << mantissa_offset(T)))

@@ -4,48 +4,39 @@ const MXMicrofloat{S,E,M} = Microfloat{S,E,M,:MX}
 const SignedMXMicrofloat = MXMicrofloat{1}
 const UnsignedMXMicrofloat = MXMicrofloat{0}
 
-# E8M0 (scale type)
-Base.isnan(x::T) where T<:MXMicrofloat{0,8,0} = reinterpret(UInt8, x) == 0xff
-nan(::Type{T}) where T<:MXMicrofloat{0,8,0} = reinterpret(T, 0xff)
-Base.isinf(::T) where T<:MXMicrofloat{0,8,0} = false
+const MX_E5M2 = MXMicrofloat{1,5,2}
+const MX_E4M3 = MXMicrofloat{1,4,3}
+const MX_E3M2 = MXMicrofloat{1,3,2}
+const MX_E2M3 = MXMicrofloat{1,2,3}
+const MX_E2M1 = MXMicrofloat{1,2,1}
+const MX_E8M0 = MXMicrofloat{0,8,0}
+
+const MX_NO_INF = Union{MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0}
+const MX_NO_NAN = Union{MX_E3M2, MX_E2M3, MX_E2M1}
+const MX_NO_NAN_OR_INF = Union{MX_E3M2, MX_E2M3, MX_E2M1}
+
+Base.isinf(::MX_NO_INF) = false
+Base.isnan(::MX_NO_NAN) = false
+nan(::Type{T}) where T<:MX_NO_NAN = throw(DomainError(T, "$T has no NaN values"))
+
+Base.floatmax(::Type{T}) where T<:MX_NO_NAN_OR_INF = reinterpret(T, exponent_mask(T) | mantissa_mask(T))
 
 # E4M3 (MX): no Infs; only mantissa == 111 at exp=1111 is NaN
-nan(::Type{T}) where {S,T<:MXMicrofloat{S,4,3}} = reinterpret(T, exponent_mask(T) | mantissa_mask(T))
-Base.isnan(x::T) where {S,T<:MXMicrofloat{S,4,3}} =
+nan(::Type{T}) where T<:MX_E4M3 = reinterpret(T, exponent_mask(T) | mantissa_mask(T))
+Base.isnan(x::T) where T<:MX_E4M3 =
     (only_exponent(x) == exponent_mask(T)) && (only_mantissa(x) == mantissa_mask(T))
-Base.isinf(::T) where {S,T<:MXMicrofloat{S,4,3}} = false
-Base.floatmax(::Type{T}) where {S,T<:MXMicrofloat{S,4,3}} =
+Base.floatmax(::Type{T}) where T<:MX_E4M3 =
     reinterpret(T, exponent_mask(T) | (mantissa_mask(T) & ~(bit_ones(1, uint(T)) << mantissa_offset(T))))
 
-# no adjustments for E5M2
-
-# E3M2 (MX): no Infs, no NaN sentinel; NaN maps to max finite
-nan(::Type{T}) where {S,T<:MXMicrofloat{S,3,2}} = floatmax(T)
-Base.isnan(::T) where {S,T<:MXMicrofloat{S,3,2}} = false
-Base.isinf(::T) where {S,T<:MXMicrofloat{S,3,2}} = false
-Base.floatmax(::Type{T}) where {S,T<:MXMicrofloat{S,3,2}} =
-    reinterpret(T, exponent_mask(T) | mantissa_mask(T))
-
-# E2M3 (MX): no Infs, no NaN sentinel; NaN maps to max finite
-nan(::Type{T}) where {S,T<:MXMicrofloat{S,2,3}} = floatmax(T)
-Base.isnan(::T) where {S,T<:MXMicrofloat{S,2,3}} = false
-Base.isinf(::T) where {S,T<:MXMicrofloat{S,2,3}} = false
-Base.floatmax(::Type{T}) where {S,T<:MXMicrofloat{S,2,3}} =
-    reinterpret(T, exponent_mask(T) | mantissa_mask(T))
-
-# E2M1 (MX): no Infs, no NaN sentinel; NaN maps to max finite
-nan(::Type{T}) where {S,T<:MXMicrofloat{S,2,1}} = floatmax(T)
-Base.isnan(::T) where {S,T<:MXMicrofloat{S,2,1}} = false
-Base.isinf(::T) where {S,T<:MXMicrofloat{S,2,1}} = false
-Base.floatmax(::Type{T}) where {S,T<:MXMicrofloat{S,2,1}} =
-    reinterpret(T, exponent_mask(T) | mantissa_mask(T))
+# E8M0 (scale type)
+Base.isnan(x::MX_E8M0) = reinterpret(UInt8, x) == 0xff
+nan(::Type{MX_E8M0}) = reinterpret(MX_E8M0, 0xff)
 
 # Float32 conversion for MX variants:
 # - exp=all-ones is "normal" except for the MX NaN sentinel(s)
 # - otherwise identical mapping as IEEE
-@inline function _float32(x::T) where {T<:MXMicrofloat}
-    early = _float32_injection(x)
-    isnothing(early) || return early
+function _float32(x::T) where {T<:MXMicrofloat}
+    T isa MX_E8M0 && reinterpret(UInt8, x) == 0xff && return NaN32
 
     sgn = UInt32(right_aligned_sign(x))
     exp = UInt32(right_aligned_exponent(x))
@@ -90,8 +81,7 @@ function create_base_shifttable(::Type{T}) where {T<:MXMicrofloat}
 
     e_shift_subnorm = n_mantissa_bits(Float32) - (n_mantissa_bits(T) - 1) + e_normal(T) - 1
     # MX uses the all-ones exponent as finite for data types (E5M2/E4M3/E3M2/E2M3/E2M1)
-    is_scale = (n_sign_bits(T) == 0 && n_exponent_bits(T) == 8 && n_mantissa_bits(T) == 0)
-    e_overflow_mx = is_scale ? Int(e_overflow(T)) : Int(e_overflow(T)) + 1
+    e_overflow_mx = T <: MX_E8M0 ? Int(e_overflow(T)) : Int(e_overflow(T)) + 1
 
     for i = 0:255
         e = i - 127
@@ -126,12 +116,6 @@ function create_base_shifttable(::Type{T}) where {T<:MXMicrofloat}
         end
     end
     return reinterpret(UInt8, basetable), shifttable
-end
-
-# E8M0 specific early injection remains; fill in more if needed
-function _float32_injection(x::T) where T<:UnsignedMXMicrofloat{8,0}
-    reinterpret(UInt8, x) == 0xff && return NaN32
-    nothing
 end
 
 # Saturating bounds for MX: use finite extrema
