@@ -1,5 +1,6 @@
 using Test
 using Microfloats
+using Random
 
 const TYPES = [
     Microfloat(0, 3, 4),
@@ -88,6 +89,26 @@ end
                     @test iszero(a[3]) && iszero(b[3])
                 else
                     @test a[2] < b[2]
+                end
+            end
+        end
+    end
+end
+
+@testset "IEEE microfloats: rand and randn" begin
+    for seed in 1:10
+        rng = MersenneTwister(seed)
+        for T in TYPES
+            @testset "$T rand()" begin
+                xs = rand(rng, T, 1000)
+                @test all(x -> isfinite(x), xs)
+                @test any(x -> x != zero(T), xs)  # likely non-degenerate
+            end
+            if Microfloats.n_sign_bits(T) == 1
+                @testset "$T randn()" begin
+                    xs = randn(rng, T, 1000)
+                    @test all(isfinite, xs)
+                    @test any(x -> x != zero(T), xs)
                 end
             end
         end

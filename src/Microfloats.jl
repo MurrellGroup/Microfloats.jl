@@ -14,5 +14,6 @@ include("ops.jl")
 
 include("show.jl")
 
+include("random.jl")
 
 end
