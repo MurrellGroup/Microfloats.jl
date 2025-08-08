@@ -1,7 +1,7 @@
 name = "Microfloats"
 uuid = "31c70f10-a750-4521-b13c-797315ae2933"
 authors = ["Anton Oresten <antonoresten@gmail.com> and contributors"]
-version = "0.0.1"
+version = "0.0.2"
 
 [compat]
 julia = "1.10"

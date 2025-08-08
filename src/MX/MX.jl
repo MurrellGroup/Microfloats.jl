@@ -98,8 +98,10 @@ function create_base_shifttable(::Type{T}) where {T<:MXMicrofloat}
         if e < e_subnormal(T)
             basetable[i|0x000+1] = zero(T)
             basetable[i|0x100+1] = -zero(T)
-            shifttable[i|0x000+1] = n_mantissa_bits(T)+1
-            shifttable[i|0x100+1] = n_mantissa_bits(T)+1
+            # Provide a large shift so rounding logic can raise to the minimal subnormal when appropriate
+            sh = -e + e_shift_subnorm
+            shifttable[i|0x000+1] = sh
+            shifttable[i|0x100+1] = sh
         elseif e < e_normal(T)
             basetable[i|0x000+1] = zero(T)
             basetable[i|0x100+1] = -zero(T)

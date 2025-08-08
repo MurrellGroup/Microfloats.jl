@@ -5,8 +5,6 @@ const E2M3 = Microfloat(1, 2, 3, :MX)
 const E2M1 = Microfloat(1, 2, 1, :MX)
 const E8M0 = Microfloat(0, 8, 0, :MX)
 
-uint8(x) = reinterpret(UInt8, x)
-
 @testset "MX: no Infs" begin
     for T in (E4M3, E3M2, E2M3, E2M1, E8M0)
         @testset "$T no isinf()" begin

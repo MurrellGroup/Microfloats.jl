@@ -17,8 +17,11 @@ function create_base_shifttable(::Type{T}) where {T<:Microfloat}
         if e < e_subnormal(T)                   # Very small numbers map to +- zero
             basetable[i|0x000+1] = zero(T)
             basetable[i|0x100+1] = -zero(T)
-            shifttable[i|0x000+1] = n_mantissa_bits(T)+1
-            shifttable[i|0x100+1] = n_mantissa_bits(T)+1
+            # Use a large shift that depends on how far below the subnormal threshold we are,
+            # so mantissa contribution is zero and rounding behaves correctly (may bump to min subnormal).
+            sh = -e + e_shift_subnorm
+            shifttable[i|0x000+1] = sh
+            shifttable[i|0x100+1] = sh
         elseif e < e_normal(T)                  # Small numbers map to denorms
             basetable[i|0x000+1] = zero(T)
             basetable[i|0x100+1] = -zero(T)
