@@ -116,7 +116,7 @@ end
 @testset "MX: subnormals and zeros" begin
     for T in (E4M3, E3M2, E2M3, E2M1)
         @testset "$T subnormal min value" begin
-            if Microfloats.n_mantissa_bits(T) > 0
+            if Microfloats.has_mantissa(T)
                 u = UInt8(1) << Microfloats.mantissa_offset(T)
                 x = reinterpret(T, u)
                 expected = Float32(2.0)^(1 - Microfloats.bias(T) - Microfloats.n_mantissa_bits(T))

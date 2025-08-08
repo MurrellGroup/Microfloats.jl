@@ -27,6 +27,46 @@ const TYPES = [
     Microfloat(1, 2, 1),
 ]
 
+@testset "Microfloat" begin
+    @test UnsignedMicrofloat(3, 4) == Microfloat(0, 3, 4)
+
+
+    for T in TYPES
+        @test hash(one(T)) == hash(1)
+
+        @test prevfloat(eps(T)) < eps(T)
+        @test nextfloat(eps(T)) > eps(T)
+        @test nextfloat(zero(T)) > zero(T)
+        @test isfinite(prevfloat(T(Inf)))
+
+        if Microfloats.n_exponent_bits(T) > 1
+            @test floatmin(T) == reinterpret(T, 0x01 << Microfloats.exponent_offset(T))
+        else
+            @test_throws DomainError floatmin(T)
+        end
+        @test floatmax(T) == prevfloat(T(Inf))
+
+        @test typemax(T) == T(Inf)
+
+        @test sign(T(Inf)) == 1.0
+        @test sign(T(1.0)) == 1.0
+        @test sign(T(0.0)) == 0.0
+        @test isnan(sign(T(NaN)))
+
+        if T <: SignedMicrofloat
+            @test typemin(T) == T(-Inf)
+
+            @test sign(T(-0.0)) == -0.0
+            @test sign(T(-1.0)) == -1.0
+            @test sign(T(-Inf)) == -1.0
+        else
+            @test typemin(T) == zero(T)
+        end
+
+        @test precision(T) == Microfloats.n_mantissa_bits(T) + 1
+    end
+end
+
 @testset "IEEE microfloats: subnormals and rounding" begin
     for T in TYPES
         @testset "$T boundaries" begin

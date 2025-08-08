@@ -34,12 +34,12 @@ Base.isinf(x::T) where T<:Microfloat = x === inf(T)
 Base.isnan(x::T) where T<:Microfloat = only_exponent(x) === exponent_mask(T) && !iszero(only_mantissa(x))
 
 Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
-Base.one(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << exponent_offset(T))
+Base.one(::Type{T}) where T<:Microfloat = T(1.0f0)
 
 Base.eps(x::Microfloat) = max(x-prevfloat(x), nextfloat(x)-x)
 Base.eps(T::Type{<:Microfloat}) = eps(one(T))
 
-Base.floatmin(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(1) << exponent_offset(T))
+Base.floatmin(::Type{T}) where T<:Microfloat = n_exponent_bits(T) > 1 ? reinterpret(T, bit_ones(1) << exponent_offset(T)) : throw(DomainError(T, "$T has no normal numbers"))
 Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << (exponent_offset(T) + 1) | mantissa_mask(T))
 
 Base.typemin(::Type{T}) where T<:Microfloat = -inf(T)
@@ -52,7 +52,6 @@ Base.iszero(x::T) where T<:Microfloat = abs(x) === zero(T)
 Base.:(-)(x::T) where T<:Microfloat = reinterpret(T, sign_mask(T) ⊻ reinterpret(UInt8, x))
 Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
-# https://github.com/JuliaLang/julia/blob/46c2a5c7e1f970e83b408b6ddcba49aaa31d8329/base/float.jl#L799-L801
 Base.precision(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
 
 Base.signbit(x::Microfloat) = x !== abs(x)
@@ -63,6 +62,8 @@ Base.round(x::Microfloat, r::RoundingMode) = reinterpret(typeof(x), round(Float3
 function Base.nextfloat(x::T) where T<:Microfloat
     if isnan(x) || x === inf(T)
         return x
+    elseif x === -inf(T)
+        return -floatmax(T)
     elseif iszero(x)
         return reinterpret(T, bit_ones(1) << mantissa_offset(T))
     elseif ispositive(x)
@@ -73,7 +74,11 @@ function Base.nextfloat(x::T) where T<:Microfloat
 end
 
 function Base.prevfloat(x::T) where T<:Microfloat
-    if isnan(x) || x === -inf(T)
+    if isnan(x)
+        return x
+    elseif x === inf(T)
+        return floatmax(T)
+    elseif x === -inf(T) # need this to be after inf(T) for unsigned types
         return x
     elseif iszero(x)
         return reinterpret(T, sign_mask(T) | (bit_ones(1) << mantissa_offset(T)))
