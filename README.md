@@ -20,7 +20,7 @@ const Float8 = Microfloat(1, 3, 4)
 const Float8_4 = Microfloat(1, 4, 3)
 
 # creating a sawed-off Float16 (BFloat8?) becomes trivial:
-const BFloat8 = Microfloat(1, 5, 2)
+const Float8_5 = Microfloat(1, 5, 2)
 ```
 
 ### MX format
