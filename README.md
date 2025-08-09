@@ -46,5 +46,5 @@ Pkg.add("Microfloats")
 
 ## See also
 
-- [MicroFloatingPoints](https://github.com/goualard-f/MicroFloatingPoints.jl)
+- [MicroFloatingPoints.jl](https://github.com/goualard-f/MicroFloatingPoints.jl)
 - [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
