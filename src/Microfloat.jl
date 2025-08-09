@@ -34,7 +34,7 @@ nan(::Type{T}) where T<:Microfloat = has_mantissa(T) ?
     reinterpret(T, exponent_mask(T) | (bit_ones(1, uint(T)) << mantissa_offset(T))) :
     throw(DomainError(T, "$T has no NaN values"))
 
-Base.isinf(x::T) where T<:Microfloat = x === inf(T)
+Base.isinf(x::T) where T<:Microfloat = x === inf(T) || x === -inf(T)
 Base.isnan(x::T) where T<:Microfloat = only_exponent(x) === exponent_mask(T) && !iszero(only_mantissa(x))
 
 Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
@@ -61,7 +61,7 @@ Base.precision(::Type{T}) where T<:Microfloat = n_mantissa_bits(T) + 1
 Base.signbit(x::Microfloat) = x !== abs(x)
 Base.sign(x::Microfloat) = ifelse(isnan(x) || iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
 
-Base.round(x::T, r::RoundingMode) where T<:Microfloat = T(round(Float32(x), r))
+Base.round(x::T, r::RoundingMode; kws...) where T<:Microfloat = T(round(Float32(x), r; kws...))
 
 function Base.nextfloat(x::T) where T<:Microfloat
     if isnan(x)
@@ -95,15 +95,16 @@ function Base.prevfloat(x::T) where T<:Microfloat
     end
 end
 
-Base.promote_rule(::Type{<:Microfloat},::Type{Float16}) = Float16
-Base.promote_rule(::Type{<:Microfloat},::Type{Float32}) = Float32
-Base.promote_rule(::Type{<:Microfloat},::Type{Float64}) = Float64
-Base.promote_rule(T::Type{<:Microfloat},::Type{<:Integer}) = T
+const STANDARD_FLOATS = Union{Float16, Float32, Float64, BigFloat}
 
-# make work with other types
-# reduce branching
-function Base.:(==)(x::T, y::T) where T<:Microfloat
-    (isnan(x) || isnan(y)) && return false
-    (iszero(x) && iszero(y)) && return true
-    return x === y
-end
+Base.promote_rule(::Type{<:Microfloat}, ::Type{T}) where T<:STANDARD_FLOATS = Float32
+Base.promote_rule(::Type{<:Microfloat}, ::Type{T}) where T<:Integer = Float32
+
+# Microfloat vs Microfloat: dominance within same variant, else Float32
+Base.promote_rule(::Type{Microfloat{S1,E1,M1,V}}, ::Type{Microfloat{S2,E2,M2,V}}) where {S1,E1,M1,S2,E2,M2,V} =
+    (S1 ≤ S2 && E1 ≤ E2 && M1 ≤ M2) ? Microfloat{S2,E2,M2,V} :
+    (S2 ≤ S1 && E2 ≤ E1 && M2 ≤ M1) ? Microfloat{S1,E1,M1,V} :
+    Float32
+
+# Cross-variant: fall back to Float32
+Base.promote_rule(::Type{<:Microfloat}, ::Type{<:Microfloat}) = Float32
