@@ -28,13 +28,15 @@ function create_base_shifttable(::Type{T}) where {T<:Microfloat}
         elseif e < 128                          # Large numbers map to Infinity
             basetable[i|0x000+1] = inf(T)
             basetable[i|0x100+1] = -inf(T)
-            shifttable[i|0x000+1] = n_mantissa_bits(T)+1
-            shifttable[i|0x100+1] = n_mantissa_bits(T)+1
+            # Use a large shift so mantissa contribution is zero (keeps Inf)
+            shifttable[i|0x000+1] = n_mantissa_bits(Float32) + 1
+            shifttable[i|0x100+1] = n_mantissa_bits(Float32) + 1
         else                                    # Infinity and NaN's stay Infinity and NaN's
             basetable[i|0x000+1] = inf(T)
             basetable[i|0x100+1] = -inf(T)
-            shifttable[i|0x000+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
-            shifttable[i|0x100+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
+            # Also suppress mantissa for Float32 Inf inputs so they remain Inf
+            shifttable[i|0x000+1] = n_mantissa_bits(Float32) + 1
+            shifttable[i|0x100+1] = n_mantissa_bits(Float32) + 1
         end
     end
 

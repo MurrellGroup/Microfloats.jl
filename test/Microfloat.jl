@@ -27,6 +27,12 @@ const TYPES = [
     Microfloat(1, 2, 1),
 ]
 
+function all_values(::Type{T}) where T<:Microfloat
+    N = Microfloats.n_utilized_bits(T)
+    right_padding = 8 - N
+    return [reinterpret(T, UInt8(u << right_padding)) for u in 0:2^N-1]
+end
+
 @testset "Microfloat" begin
     @test UnsignedMicrofloat(3, 4) == Microfloat(0, 3, 4)
 
