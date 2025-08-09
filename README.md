@@ -25,7 +25,7 @@ const Float8_5 = Microfloat(1, 5, 2)
 
 ### MX format
 
-Microfloats additionally implements the `E4M3`, `E5M2`, `E2M3`, `E3M2`, `E2M1`, and `E8M0` formats from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with some of these using saturating semantics (no Inf, single or fewer NaN representations). These can be constructed by passing an additional `:MX` argument to the `Microfloat` constructor:
+Microfloats additionally implements the `E4M3`, `E5M2`, `E2M3`, `E3M2`, `E2M1`, and `E8M0` formats from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with most of these using saturated arithmetic (no infinities), and different bit layouts for NaNs. These can be constructed by passing an additional `:MX` argument to the `Microfloat` constructor:
 
 ```julia
 const E4M3 = Microfloat(1, 4, 3, :MX)
