@@ -5,7 +5,7 @@
 [![Build Status](https://github.com/MurrellGroup/Microfloats.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/MurrellGroup/Microfloats.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Coverage](https://codecov.io/gh/MurrellGroup/Microfloats.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/MurrellGroup/Microfloats.jl)
 
-Microfloats is a Julia package that implements floating point types and arithmetic for sub-8 bit floating point types. It generalizes the [Float8s.jl](https://github.com/JuliaMath/Float8s.jl) package by supporting arbitrary combinations of sign, exponent, and mantissa bits.
+Microfloats is a Julia package that implements floating point types and arithmetic for sub-8 bit floating point types, supporting arbitrary combinations of sign, exponent, and mantissa bits.
 
 Instantiated sub-8 bit floating point types are still 8 bits wide; the goal of `Microfloat` is to serve as a base for arithmetic operations on these types, allowing for downstream packages to implement e.g. hardware-accelerated and bit-packed operations on these types.
 
@@ -43,3 +43,8 @@ using Pkg
 Pkg.Registry.add(url="https://github.com/MurrellGroup/MurrellGroupRegistry")
 Pkg.add("Microfloats")
 ```
+
+## See also
+
+- [MicroFloatingPoints](https://github.com/goualard-f/MicroFloatingPoints.jl)
+- [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
