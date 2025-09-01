@@ -36,6 +36,8 @@ const E2M1 = Microfloat(1, 2, 1, :MX)
 const E8M0 = Microfloat(0, 8, 0, :MX)
 ```
 
+For `INT8`, see `FixedPointNumbers.Q1f6`.
+
 ## Installation
 
 ```julia
@@ -49,3 +51,4 @@ Pkg.add("Microfloats")
 - [MicroFloatingPoints.jl](https://github.com/goualard-f/MicroFloatingPoints.jl)
 - [DLFP8Types.jl](https://github.com/chengchingwen/DLFP8Types.jl)
 - [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
+- [FixedPointNumbers.jl](https://github.com/JuliaMath/FixedPointNumbers.jl)

@@ -29,13 +29,10 @@ const TYPES = [
 
 function all_values(::Type{T}) where T<:Microfloat
     N = Microfloats.n_utilized_bits(T)
-    right_padding = 8 - N
-    return [reinterpret(T, UInt8(u << right_padding)) for u in 0:2^N-1]
+    return [reinterpret(T, UInt8(u)) for u in 0:2^N-1]
 end
 
 @testset "Microfloat" begin
-    @test UnsignedMicrofloat(3, 4) == Microfloat(0, 3, 4)
-
 
     @testset for T in TYPES
         @test hash(one(T)) == hash(1)
@@ -59,7 +56,7 @@ end
         @test sign(T(0.0)) == 0.0
         @test isnan(sign(T(NaN)))
 
-        if T <: SignedMicrofloat
+        if T <: Microfloat{1}
             @test typemin(T) == T(-Inf)
 
             @test sign(T(-0.0)) == -0.0
@@ -115,13 +112,12 @@ end
 @testset "IEEE microfloats: monotonic Float32 mapping (canonical encodings)" begin
     @testset for T in TYPES
         vals = Tuple{UInt8,Float32,Any}[]
-        mshift = Microfloats.mantissa_offset(T)
-        mmask  = UInt8(Microfloats.mantissa_mask(T))
         for u in UInt8(0):UInt8(0xff)
             x = reinterpret(T, u)
             isnan(x) && continue
-            # Only include canonical encodings: mantissa padding bits zero
-            ((u & ~mmask) != (u & ~mmask & ~(UInt8(1)<<mshift - UInt8(1)))) && continue
+            # Only include canonical encodings: padding bits outside fields are zero
+            used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.mantissa_mask(T))
+            ((u & ~used_mask) != 0x00) && continue
             push!(vals, (u, Float32(x), x))
         end
         sort!(vals, by = t -> t[2])

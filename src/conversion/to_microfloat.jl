@@ -43,7 +43,9 @@ function create_base_shifttable(::Type{T}) where {T<:Microfloat}
     return reinterpret(UInt8, basetable), shifttable
 end
 
-@generated function (::Type{T})(x::Float32) where {S,E,M,T<:Microfloat{S,E,M}}
+(::Type{T})(x::Float32) where {S,E,M,T<:Microfloat{S,E,M}} = T{IEEE}(x)
+
+@generated function (::Type{T})(x::Float32) where {S,E,M,V,T<:Microfloat{S,E,M,V}}
     basetable, shifttable = create_base_shifttable(T)
 
     quote

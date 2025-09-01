@@ -8,7 +8,7 @@
         @testset "FP8" begin
 
             @testset "E4M3" begin
-                E4M3 = Microfloat(1, 4, 3, :MX)
+                E4M3 = Microfloat(1, 4, 3, MX)
 
                 @test Microfloats.bias(E4M3) == 7
 
@@ -74,62 +74,62 @@
         @testset "FP6" begin
 
             @testset "E2M3" begin
-                E2M3 = Microfloat(1, 2, 3, :MX)
+                E2M3 = Microfloat(1, 2, 3, MX)
 
                 @test Microfloats.bias(E2M3) == 1
 
-                @test isfinite(reinterpret(E2M3, 0b0_11_000_00))
-                @test isfinite(reinterpret(E2M3, 0b1_11_000_00))
+                @test isfinite(reinterpret(E2M3, 0b0_11_000))
+                @test isfinite(reinterpret(E2M3, 0b1_11_000))
 
                 for i in 0b001:0b111
-                    @test isfinite(reinterpret(E2M3, 0b0_11_000_00 | i << 2))
-                    @test isfinite(reinterpret(E2M3, 0b1_11_000_00 | i << 2))
+                    @test isfinite(reinterpret(E2M3, 0b0_11_000 | i << 2))
+                    @test isfinite(reinterpret(E2M3, 0b1_11_000 | i << 2))
                 end
 
-                @test iszero(reinterpret(E2M3, 0b0_00_000_00))
-                @test iszero(reinterpret(E2M3, 0b1_00_000_00))
+                @test iszero(reinterpret(E2M3, 0b0_00_000))
+                @test iszero(reinterpret(E2M3, 0b1_00_000))
 
-                @test reinterpret(E2M3, 0b0_11_111_00) == 2^2 * 1.875
-                @test reinterpret(E2M3, 0b1_11_111_00) == -2^2 * 1.875
+                @test reinterpret(E2M3, 0b0_11_111) == 2^2 * 1.875
+                @test reinterpret(E2M3, 0b1_11_111) == -2^2 * 1.875
 
-                @test reinterpret(E2M3, 0b0_01_000_00) == 2^0 * 1.0
-                @test reinterpret(E2M3, 0b1_01_000_00) == -2^0 * 1.0
+                @test reinterpret(E2M3, 0b0_01_000) == 2^0 * 1.0
+                @test reinterpret(E2M3, 0b1_01_000) == -2^0 * 1.0
 
-                @test reinterpret(E2M3, 0b0_00_111_00) == 2^0 * 0.875
-                @test reinterpret(E2M3, 0b1_00_111_00) == -2^0 * 0.875
+                @test reinterpret(E2M3, 0b0_00_111) == 2^0 * 0.875
+                @test reinterpret(E2M3, 0b1_00_111) == -2^0 * 0.875
 
-                @test reinterpret(E2M3, 0b0_00_001_00) == 2^0 * 0.125
-                @test reinterpret(E2M3, 0b1_00_001_00) == -2^0 * 0.125
+                @test reinterpret(E2M3, 0b0_00_001) == 2^0 * 0.125
+                @test reinterpret(E2M3, 0b1_00_001) == -2^0 * 0.125
 
             end
 
             @testset "E3M2" begin
-                E3M2 = Microfloat(1, 3, 2, :MX)
+                E3M2 = Microfloat(1, 3, 2, MX)
 
                 @test Microfloats.bias(E3M2) == 3
 
-                @test isfinite(reinterpret(E3M2, 0b0_111_00_00))
-                @test isfinite(reinterpret(E3M2, 0b1_111_00_00))
+                @test isfinite(reinterpret(E3M2, 0b0_111_00))
+                @test isfinite(reinterpret(E3M2, 0b1_111_00))
 
                 for i in 0b01:0b11
-                    @test isfinite(reinterpret(E3M2, 0b0_111_00_00 | i << 2))
-                    @test isfinite(reinterpret(E3M2, 0b1_111_00_00 | i << 2))
+                    @test isfinite(reinterpret(E3M2, 0b0_111_00 | i << 2))
+                    @test isfinite(reinterpret(E3M2, 0b1_111_00 | i << 2))
                 end
 
-                @test iszero(reinterpret(E3M2, 0b0_000_00_00))
-                @test iszero(reinterpret(E3M2, 0b1_000_00_00))
+                @test iszero(reinterpret(E3M2, 0b0_000_00))
+                @test iszero(reinterpret(E3M2, 0b1_000_00))
 
-                @test reinterpret(E3M2, 0b0_111_11_00) == 2^4 * 1.75
-                @test reinterpret(E3M2, 0b1_111_11_00) == -2^4 * 1.75
+                @test reinterpret(E3M2, 0b0_111_11) == 2^4 * 1.75
+                @test reinterpret(E3M2, 0b1_111_11) == -2^4 * 1.75
 
-                @test reinterpret(E3M2, 0b0_001_00_00) == 2^-2 * 1.0
-                @test reinterpret(E3M2, 0b1_001_00_00) == -2^-2 * 1.0
+                @test reinterpret(E3M2, 0b0_001_00) == 2^-2 * 1.0
+                @test reinterpret(E3M2, 0b1_001_00) == -2^-2 * 1.0
 
-                @test reinterpret(E3M2, 0b0_000_11_00) == 2^-2 * 0.75
-                @test reinterpret(E3M2, 0b1_000_11_00) == -2^-2 * 0.75
+                @test reinterpret(E3M2, 0b0_000_11) == 2^-2 * 0.75
+                @test reinterpret(E3M2, 0b1_000_11) == -2^-2 * 0.75
 
-                @test reinterpret(E3M2, 0b0_000_01_00) == 2^-2 * 0.25
-                @test reinterpret(E3M2, 0b1_000_01_00) == -2^-2 * 0.25
+                @test reinterpret(E3M2, 0b0_000_01) == 2^-2 * 0.25
+                @test reinterpret(E3M2, 0b1_000_01) == -2^-2 * 0.25
             end
 
         end
@@ -137,27 +137,27 @@
         @testset "FP4" begin
 
             @testset "E2M1" begin
-                E2M1 = Microfloat(1, 2, 1, :MX)
+                E2M1 = Microfloat(1, 2, 1, MX)
 
                 @test Microfloats.bias(E2M1) == 1
 
-                @test isfinite(reinterpret(E2M1, 0b0_11_0_0000))
-                @test isfinite(reinterpret(E2M1, 0b1_11_0_0000))
+                @test isfinite(reinterpret(E2M1, 0b0_11_0))
+                @test isfinite(reinterpret(E2M1, 0b1_11_0))
 
-                @test isfinite(reinterpret(E2M1, 0b0_11_1_0000))
-                @test isfinite(reinterpret(E2M1, 0b1_11_1_0000))
+                @test isfinite(reinterpret(E2M1, 0b0_11_1))
+                @test isfinite(reinterpret(E2M1, 0b1_11_1))
 
-                @test iszero(reinterpret(E2M1, 0b0_00_0_0000))
-                @test iszero(reinterpret(E2M1, 0b1_00_0_0000))
+                @test iszero(reinterpret(E2M1, 0b0_00_0))
+                @test iszero(reinterpret(E2M1, 0b1_00_0))
 
-                @test reinterpret(E2M1, 0b0_11_1_0000) == 2^2 * 1.5
-                @test reinterpret(E2M1, 0b1_11_1_0000) == -2^2 * 1.5
+                @test reinterpret(E2M1, 0b0_11_1) == 2^2 * 1.5
+                @test reinterpret(E2M1, 0b1_11_1) == -2^2 * 1.5
 
-                @test reinterpret(E2M1, 0b0_01_0_0000) == 2^0 * 1.0
-                @test reinterpret(E2M1, 0b1_01_0_0000) == -2^0 * 1.0
+                @test reinterpret(E2M1, 0b0_01_0) == 2^0 * 1.0
+                @test reinterpret(E2M1, 0b1_01_0) == -2^0 * 1.0
 
-                @test reinterpret(E2M1, 0b0_00_1_0000) == 2^0 * 0.5
-                @test reinterpret(E2M1, 0b1_00_1_0000) == -2^0 * 0.5
+                @test reinterpret(E2M1, 0b0_00_1) == 2^0 * 0.5
+                @test reinterpret(E2M1, 0b1_00_1) == -2^0 * 0.5
             end
 
         end
@@ -168,7 +168,7 @@
 
         # arithmetic not yet supported for unsigned microfloats
         @testset "E8M0" begin
-            E8M0 = Microfloat(0, 8, 0, :MX)
+            E8M0 = Microfloat(0, 8, 0, MX)
 
             @test Microfloats.bias(E8M0) == 127
 

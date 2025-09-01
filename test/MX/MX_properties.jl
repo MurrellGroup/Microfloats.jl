@@ -1,9 +1,9 @@
-const E4M3 = Microfloat(1, 4, 3, :MX)
-const E5M2 = Microfloat(1, 5, 2, :MX)
-const E3M2 = Microfloat(1, 3, 2, :MX)
-const E2M3 = Microfloat(1, 2, 3, :MX)
-const E2M1 = Microfloat(1, 2, 1, :MX)
-const E8M0 = Microfloat(0, 8, 0, :MX)
+const E4M3 = Microfloat(1, 4, 3, MX)
+const E5M2 = Microfloat(1, 5, 2, MX)
+const E3M2 = Microfloat(1, 3, 2, MX)
+const E2M3 = Microfloat(1, 2, 3, MX)
+const E2M1 = Microfloat(1, 2, 1, MX)
+const E8M0 = Microfloat(0, 8, 0, MX)
 
 @testset "MX: no Infs" begin
     for T in (E4M3, E3M2, E2M3, E2M1, E8M0)
@@ -27,8 +27,8 @@ end
         maxm = UInt8((UInt16(1) << nm) - 1)
         for s in (UInt8(0), sm)
             for mv in UInt8(0):maxm
-                m = mv << mo
-                x = reinterpret(T, s | em | m)
+                m = (mv << mo) & mm
+                x = reinterpret(T, (s & sm) | em | m)
                 if m == mm
                     @test isnan(x)
                 else
@@ -45,11 +45,12 @@ end
             sm = UInt8(Microfloats.sign_mask(T))
             mo = Microfloats.mantissa_offset(T)
             nm = Microfloats.n_mantissa_bits(T)
+            mm = UInt8(Microfloats.mantissa_mask(T))
             maxm = UInt8((UInt16(1) << nm) - 1)
             for s in (UInt8(0), sm)
                 for mv in UInt8(0):maxm
-                    m = mv << mo
-                    x = reinterpret(T, s | em | m)
+                    m = (mv << mo) & mm
+                    x = reinterpret(T, (s & sm) | em | m)
                     @test isfinite(x)
                     @test !isnan(x)
                 end
@@ -69,11 +70,10 @@ end
 @testset "MX: round-trip via Float32 preserves bits (canonical encodings)" begin
     for T in (E4M3, E5M2, E3M2, E2M3, E2M1, E8M0)
         @testset "$T" begin
-            mshift = Microfloats.mantissa_offset(T)
-            mmask  = UInt8(Microfloats.mantissa_mask(T))
+            used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.mantissa_mask(T))
             for u in UInt8(0):UInt8(0xff)
                 # Only test canonical encodings where mantissa padding bits are zero
-                (u & ~mmask) != (u & ~mmask & ~(UInt8(1)<<mshift - UInt8(1))) && continue
+                (u & ~used_mask) != 0x00 && continue
                 x = reinterpret(T, u)
                 y = T(Float32(x))
                 @test y ≡ x
@@ -170,10 +170,9 @@ end
             for u in UInt8(0):UInt8(0xff)
                 x = reinterpret(T, u)
                 isnan(x) && continue
-                # Only include canonical encodings
-                mshift = Microfloats.mantissa_offset(T)
-                mmask  = UInt8(Microfloats.mantissa_mask(T))
-                (u & ~mmask) != (u & ~mmask & ~(UInt8(1)<<mshift - UInt8(1))) && continue
+                # Only include canonical encodings: padding bits outside fields are zero
+                used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.mantissa_mask(T))
+                (u & ~used_mask) != 0x00 && continue
                 push!(vals, (u, Float32(x), x))
             end
             sort!(vals, by = t -> t[2])

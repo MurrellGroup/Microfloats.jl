@@ -1,10 +1,10 @@
+abstract type Variant end
+abstract type IEEE <: Variant end
+
 primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
 
-const SignedMicrofloat = Microfloat{1}
-const UnsignedMicrofloat = Microfloat{0}
-
 """
-    Microfloat(S, E, M, V=:IEEE)
+    Microfloat(S, E, M, V=IEEE)
 
 Create a new `Microfloat` type with `S` sign bits, `E` exponent bits, and `M` mantissa bits.
 
@@ -12,7 +12,7 @@ This "type constructor" ensures that the resulting type is legal.
 
 The `V` argument can be set to `:MX` to create a Microscaling Format (MX) type.
 """
-function Microfloat(S::Int, E::Int, M::Int, V::Symbol=:IEEE)
+function Microfloat(S::Int, E::Int, M::Int, V::Type{<:Variant}=IEEE)
     S in (0, 1) || throw(ArgumentError("sign bit must be 0 or 1"))
     E >= 1 || throw(ArgumentError("number of exponent bits must be non-negative"))
     M >= 0 || throw(ArgumentError("number of mantissa bits must be non-negative"))
@@ -47,7 +47,7 @@ Base.floatmin(::Type{T}) where T<:Microfloat = n_exponent_bits(T) > 1 ? reinterp
 Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, bit_ones(n_exponent_bits(T) - 1) << (exponent_offset(T) + 1) | mantissa_mask(T))
 
 Base.typemin(::Type{T}) where T<:Microfloat = -inf(T)
-Base.typemin(::Type{T}) where T<:UnsignedMicrofloat = zero(T)
+Base.typemin(::Type{T}) where T<:Microfloat{0} = zero(T)
 
 Base.typemax(::Type{T}) where T<:Microfloat = inf(T)
 

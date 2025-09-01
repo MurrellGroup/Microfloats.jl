@@ -9,9 +9,9 @@ bit_ones(N, T=UInt8) = (one(uint(T)) << N) - one(uint(T))
 
 n_total_bits(::Type{T}) where T<:AbstractFloat = sizeof(T) * 8
 n_utilized_bits(::Type{T}) where T<:AbstractFloat = n_sign_bits(T) + n_exponent_bits(T) + n_mantissa_bits(T)
-n_padding_bits(::Type{T}) where T<:AbstractFloat = n_total_bits(T) - n_utilized_bits(T)
+n_rpad_bits(::Type{T}) where T<:AbstractFloat = 0
 
-mantissa_offset(::Type{T}) where T<:AbstractFloat = n_padding_bits(T)
+mantissa_offset(::Type{T}) where T<:AbstractFloat = n_rpad_bits(T)
 exponent_offset(::Type{T}) where T<:AbstractFloat = n_mantissa_bits(T) + mantissa_offset(T)
 sign_offset(::Type{T}) where T<:AbstractFloat = n_exponent_bits(T) + exponent_offset(T)
 
