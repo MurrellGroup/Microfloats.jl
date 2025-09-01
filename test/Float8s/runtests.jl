@@ -2,9 +2,6 @@
 
 using Float8s: Float8, Float8_4
 
-const FP8_E3M4 = Microfloat(1, 3, 4)
-const FP8_E4M3 = Microfloat(1, 4, 3)
-
 @testset "Float8s.jl parity" begin
 
     @testset "E3M4" begin

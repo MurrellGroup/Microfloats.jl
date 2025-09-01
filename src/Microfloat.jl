@@ -1,7 +1,24 @@
 abstract type Variant end
+
+primitive type Microfloat{S,E,M,V<:Variant} <: AbstractFloat 8 end
+
 abstract type IEEE <: Variant end
 
-primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
+const IEEEMicrofloat{S,E,M} = Microfloat{S,E,M,IEEE}
+
+"""
+    Float8_E3M4
+
+8-bit Microfloat with 1 sign bit, 3 exponent bits, and 4 mantissa bits.
+Follows the pattern of the IEEE 754 standard.
+"""
+const Float8_E3M4 = IEEEMicrofloat{1,3,4}
+
+const Float8_E4M3 = IEEEMicrofloat{1,4,3}
+const Float8_E5M2 = IEEEMicrofloat{1,5,2}
+const Float6_E2M3 = IEEEMicrofloat{1,2,3}
+const Float6_E3M2 = IEEEMicrofloat{1,3,2}
+const Float4_E2M1 = IEEEMicrofloat{1,2,1}
 
 """
     Microfloat(S, E, M, V=IEEE)
