@@ -114,6 +114,8 @@ end
 
 const STANDARD_FLOATS = Union{Float16, Float32, Float64, BigFloat}
 
+# TODO: check if these rules are even doing anything
+
 Base.promote_rule(::Type{<:Microfloat}, ::Type{T}) where T<:STANDARD_FLOATS = Float32
 Base.promote_rule(::Type{<:Microfloat}, ::Type{T}) where T<:Integer = Float32
 
