@@ -2,7 +2,7 @@ abstract type MX <: Variant end
 
 const MX_Microfloat{S,E,M} = Microfloat{S,E,M,MX}
 
-const MX_E5M2 = MX_Microfloat{1,5,2}
+const MX_E5M2 = IEEEMicrofloat{1,5,2}
 const MX_E4M3 = MX_Microfloat{1,4,3}
 const MX_E3M2 = MX_Microfloat{1,3,2}
 const MX_E2M3 = MX_Microfloat{1,2,3}
@@ -78,7 +78,7 @@ function create_base_shifttable(::Type{T}) where {T<:MX_Microfloat}
     shifttable = Vector{UInt8}(undef, 512)
 
     e_shift_subnorm = n_mantissa_bits(Float32) - (n_mantissa_bits(T) - 1) + e_normal(T) - 1
-    # MX uses the all-ones exponent as finite for data types (E5M2/E4M3/E3M2/E2M3/E2M1)
+    # MX uses the all-ones exponent as finite for data types (E4M3/E3M2/E2M3/E2M1)
     e_overflow_mx = T <: MX_E8M0 ? Int(e_overflow(T)) : Int(e_overflow(T)) + 1
 
     for i = 0:255
