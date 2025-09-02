@@ -23,20 +23,11 @@ const Float8_4 = Microfloat(1, 4, 3)
 const Float8_5 = Microfloat(1, 5, 2)
 ```
 
-### MX format
+### Microscaling (MX) Element Types
 
-Microfloats additionally implements the `E4M3`, `E5M2`, `E2M3`, `E3M2`, `E2M1`, and `E8M0` formats from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with most of these using saturated arithmetic (no infinities), and different bit layouts for NaNs. These can be constructed by passing an additional `:MX` argument to the `Microfloat` constructor:
+Microfloats implements the E4M3, E5M2, E2M3, E3M2, E2M1, and E8M0 types from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with most of these using saturated arithmetic (no infinities), and different bit layouts for NaNs. These are exported as `MX_E4M3`, `MX_E5M2`, `MX_E2M3`, `MX_E3M2`, `MX_E2M1`, and `MX_E8M0`, respectively.
 
-```julia
-const E4M3 = Microfloat(1, 4, 3, :MX)
-const E5M2 = Microfloat(1, 5, 2, :MX)
-const E2M3 = Microfloat(1, 2, 3, :MX)
-const E3M2 = Microfloat(1, 3, 2, :MX)
-const E2M1 = Microfloat(1, 2, 1, :MX)
-const E8M0 = Microfloat(0, 8, 0, :MX)
-```
-
-For `INT8`, see `FixedPointNumbers.Q1f6`.
+For INT8, see `FixedPointNumbers.Q1f6`.
 
 ## Installation
 
