@@ -29,6 +29,9 @@ Microfloats implements the E4M3, E5M2, E2M3, E3M2, E2M1, and E8M0 types from the
 
 For INT8, see `FixedPointNumbers.Q1f6`.
 
+> [!WARNING]
+> MX types may not yet be fully OCP compliant. See issues with the [![MX-compliance](https://img.shields.io/github/labels/MurrellGroup/Microfloats.jl/mx-compliance)](https://github.com/MurrellGroup/Microfloats.jl/labels/mx-compliance) label.
+
 ## Installation
 
 ```julia
