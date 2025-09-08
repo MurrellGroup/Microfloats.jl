@@ -1,5 +1,4 @@
-bias(::Type{T}) where T<:Microfloat = UInt32(2^(n_exponent_bits(T) - 1) - 1)
-bias_difference(::Type{T}) where T<:Microfloat = UInt32(127 - bias(T))
+bias_difference(::Type{T}) where T<:Microfloat = UInt32(exponent_bias(Float32) - exponent_bias(T))
 
 include("to_microfloat.jl")
 include("from_microfloat.jl")

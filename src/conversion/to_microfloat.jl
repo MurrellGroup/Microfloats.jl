@@ -1,6 +1,6 @@
-e_subnormal(T) = 1 - bias(T) - n_mantissa_bits(T)
-e_normal(T) = 1 - bias(T)
-e_overflow(T) = (2^n_exponent_bits(T) - 2) - bias(T) + 1
+e_subnormal(T) = 1 - exponent_bias(T) - n_mantissa_bits(T)
+e_normal(T) = 1 - exponent_bias(T)
+e_overflow(T) = (2^n_exponent_bits(T) - 2) - exponent_bias(T) + 1
 
 function create_base_shifttable(::Type{T}) where {T<:Microfloat}
 
@@ -20,7 +20,7 @@ function create_base_shifttable(::Type{T}) where {T<:Microfloat}
             shifttable[i|0x000+1] = -e+e_shift_subnorm
             shifttable[i|0x100+1] = -e+e_shift_subnorm
         elseif e < e_overflow(T)                # Normal numbers just lose precision
-            basebits = (e + Int(bias(T))) << exponent_offset(T)
+            basebits = (e + Int(exponent_bias(T))) << exponent_offset(T)
             basetable[i|0x000+1] = reinterpret(T, UInt8(basebits))
             basetable[i|0x100+1] = reinterpret(T, UInt8(basebits | Int(sign_mask(T))))
             shifttable[i|0x000+1] = n_mantissa_bits(Float32)-n_mantissa_bits(T)
@@ -49,7 +49,6 @@ end
     basetable, shifttable = create_base_shifttable(T)
 
     quote
-        isnan(x) && return nan(T) # TODO retain the significant bits for NaN?
         f = reinterpret(UInt32, x)
     
         # exponent+sign index into 512-entry tables (9 bits), 1-based
@@ -75,6 +74,6 @@ end
                 h = h + (UInt8(1) << mantissa_offset(T))
             end
         end
-        return reinterpret(T, h)
+        return ifelse(isnan(x), nan(T), reinterpret(T, h)) # TODO retain the significant bits for NaN?
     end
 end

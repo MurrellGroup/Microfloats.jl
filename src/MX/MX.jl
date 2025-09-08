@@ -2,7 +2,7 @@ abstract type MX <: Variant end
 
 const MX_Microfloat{S,E,M} = Microfloat{S,E,M,MX}
 
-const MX_E5M2 = IEEEMicrofloat{1,5,2}
+const MX_E5M2 = MX_Microfloat{1,5,2} # technically IEEE 754 compliant
 const MX_E4M3 = MX_Microfloat{1,4,3}
 const MX_E3M2 = MX_Microfloat{1,3,2}
 const MX_E2M3 = MX_Microfloat{1,2,3}
@@ -15,7 +15,7 @@ const NO_NAN_OR_INF = Union{MX_E3M2, MX_E2M3, MX_E2M1}
 
 Base.isinf(::NO_INF) = false
 Base.isnan(::NO_NAN) = false
-nan(::Type{T}) where T<:NO_NAN = throw(DomainError(T, "$T has no NaN values"))
+nan(::Type{T}) where T<:NO_NAN = zero(T)
 
 Base.floatmax(::Type{T}) where T<:NO_NAN_OR_INF = reinterpret(T, exponent_mask(T) | mantissa_mask(T))
 
@@ -33,8 +33,8 @@ nan(::Type{MX_E8M0}) = reinterpret(MX_E8M0, 0xff)
 # Float32 conversion for MX variants:
 # - exp=all-ones is "normal" except for the MX NaN sentinel(s)
 # - otherwise identical mapping as IEEE
-function _float32(x::T) where {T<:MX_Microfloat}
-    T isa MX_E8M0 && reinterpret(UInt8, x) == 0xff && return NaN32
+function _float32(x::T) where {T<:Union{MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0}}
+    T <: MX_E8M0 && reinterpret(UInt8, x) === 0xff && return NaN32
 
     sgn = UInt32(right_aligned_sign(x))
     exp = UInt32(right_aligned_exponent(x))
@@ -73,7 +73,7 @@ function _float32(x::T) where {T<:MX_Microfloat}
 end
 
 # Saturating to_microfloat tables for MX (no Infs; overflow -> ±floatmax)
-function create_base_shifttable(::Type{T}) where {T<:MX_Microfloat}
+function create_base_shifttable(::Type{T}) where {T<:Union{MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0}}
     basetable = Vector{T}(undef, 512)
     shifttable = Vector{UInt8}(undef, 512)
 
@@ -89,7 +89,7 @@ function create_base_shifttable(::Type{T}) where {T<:MX_Microfloat}
             shifttable[i|0x000+1] = -e + e_shift_subnorm
             shifttable[i|0x100+1] = -e + e_shift_subnorm
         elseif e < e_overflow_mx
-            basebits = (e + Int(bias(T))) << exponent_offset(T)
+            basebits = (e + Int(exponent_bias(T))) << exponent_offset(T)
             basetable[i|0x000+1] = reinterpret(T, UInt8(basebits))
             basetable[i|0x100+1] = reinterpret(T, UInt8(basebits | Int(sign_mask(T))))
             shifttable[i|0x000+1] = n_mantissa_bits(Float32) - n_mantissa_bits(T)
@@ -106,7 +106,7 @@ function create_base_shifttable(::Type{T}) where {T<:MX_Microfloat}
             shifttable[i|0x100+1] = n_mantissa_bits(Float32) - n_mantissa_bits(T)
         end
     end
-    return reinterpret(UInt8, basetable), shifttable
+    return (reinterpret(UInt8, basetable)...,), (shifttable...,)
 end
 
 # Saturating bounds for MX: use finite extrema

@@ -72,7 +72,7 @@ end
 
 @testset "IEEE microfloats: subnormals and rounding" begin
     @testset for T in TYPES
-        bias = Microfloats.bias(T)
+        bias = Microfloats.exponent_bias(T)
         M = Microfloats.n_mantissa_bits(T)
         mo = Microfloats.mantissa_offset(T)
         # Encoding for the minimum positive subnormal (mantissa LSB only)

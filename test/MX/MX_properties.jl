@@ -76,21 +76,23 @@ end
 end
 
 @testset "MX: saturation and NaN/Inf mapping from Float32" begin
-    for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
+    for T in (MX_E5M2, MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
         @testset "$T" begin
             fmax = floatmax(T)
             # +Inf/-Inf map to ±floatmax (unsigned maps both to +floatmax)
-            @test T(Inf32) == fmax
-            if Microfloats.n_sign_bits(T) == 0
-                @test T(-Inf32) == fmax
-            else
-                @test T(-Inf32) == -fmax
+            if !(T <: MX_E5M2)
+                @test T(Inf32) == fmax
+                if Microfloats.n_sign_bits(T) == 0
+                    @test T(-Inf32) == fmax
+                else
+                    @test T(-Inf32) == -fmax
+                end
             end
             # NaN maps to sentinel for E4M3/E8M0, else saturates to floatmax
             if T <: Union{MX_E4M3, MX_E5M2, MX_E8M0}
                 @test isnan(T(NaN32))
             else
-                @test_throws DomainError T(NaN32)
+                @test iszero(T(NaN32))
             end
             # Values just beyond floatmax saturate
             big = nextfloat(Float32(fmax))
@@ -110,7 +112,7 @@ end
             if Microfloats.has_mantissa(T)
                 u = UInt8(1) << Microfloats.mantissa_offset(T)
                 x = reinterpret(T, u)
-                expected = Float32(2.0)^(1 - Microfloats.bias(T) - Microfloats.n_mantissa_bits(T))
+                expected = Float32(2.0)^(1 - Microfloats.exponent_bias(T) - Microfloats.n_mantissa_bits(T))
                 @test Float32(x) == expected
             end
         end

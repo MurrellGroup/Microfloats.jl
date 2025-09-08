@@ -8,7 +8,7 @@
         @testset "FP8" begin
 
             @testset "E4M3" begin
-                @test Microfloats.bias(MX_E4M3) == 7
+                @test Microfloats.exponent_bias(MX_E4M3) == 7
 
                 @test isfinite(reinterpret(MX_E4M3, 0b0_1111_000))
                 @test isfinite(reinterpret(MX_E4M3, 0b1_1111_000))
@@ -38,7 +38,7 @@
             end
 
             @testset "E5M2" begin
-                @test Microfloats.bias(MX_E5M2) == 15
+                @test Microfloats.exponent_bias(MX_E5M2) == 15
 
                 @test reinterpret(UInt8, MX_E5M2(Inf)) == 0b0_11111_00
                 @test reinterpret(UInt8, MX_E5M2(-Inf)) == 0b1_11111_00
@@ -71,7 +71,7 @@
         @testset "FP6" begin
 
             @testset "E2M3" begin
-                @test Microfloats.bias(MX_E2M3) == 1
+                @test Microfloats.exponent_bias(MX_E2M3) == 1
 
                 @test isfinite(reinterpret(MX_E2M3, 0b0_11_000))
                 @test isfinite(reinterpret(MX_E2M3, 0b1_11_000))
@@ -98,7 +98,7 @@
             end
 
             @testset "E3M2" begin
-                @test Microfloats.bias(MX_E3M2) == 3
+                @test Microfloats.exponent_bias(MX_E3M2) == 3
 
                 @test isfinite(reinterpret(MX_E3M2, 0b0_111_00))
                 @test isfinite(reinterpret(MX_E3M2, 0b1_111_00))
@@ -129,7 +129,7 @@
         @testset "FP4" begin
 
             @testset "E2M1" begin
-                @test Microfloats.bias(MX_E2M1) == 1
+                @test Microfloats.exponent_bias(MX_E2M1) == 1
 
                 @test isfinite(reinterpret(MX_E2M1, 0b0_11_0))
                 @test isfinite(reinterpret(MX_E2M1, 0b1_11_0))
@@ -158,7 +158,7 @@
 
         # arithmetic not yet supported for unsigned microfloats
         @testset "E8M0" begin
-            @test Microfloats.bias(MX_E8M0) == 127
+            @test Microfloats.exponent_bias(MX_E8M0) == 127
 
             #@test floatmax(E8M0) == floatmax(Float32) / 2
 
