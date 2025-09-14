@@ -1,8 +1,0 @@
-bias_difference(::Type{T}) where T<:Microfloat = UInt32(exponent_bias(Float32) - exponent_bias(T))
-
-include("to_microfloat.jl")
-include("from_microfloat.jl")
-
-(::Type{T})(x::Microfloat) where T<:Number = T(Float32(x))
-(::Type{T})(x::Number) where T<:Microfloat = T(Float32(x))
-(::Type{T})(x::Microfloat) where T<:Microfloat = T(Float32(x))
