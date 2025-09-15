@@ -23,6 +23,14 @@ const Float8_4 = Microfloat(1, 4, 3)
 const Float8_5 = Microfloat(1, 5, 2)
 ```
 
+and why don't we remove the sign bit?
+
+```julia
+const UFloat7 = Microfloat(0, 3, 4)
+const UFloat7_4 = Microfloat(0, 4, 3)
+const UFloat7_5 = Microfloat(0, 5, 2)
+```
+
 ### Microscaling (MX)
 
 Microfloats implements the E4M3, E5M2, E2M3, E3M2, E2M1, and E8M0 types from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with most of these using saturated arithmetic (no infinities), and different bit layouts for NaNs. These are exported as `MX_E4M3`, `MX_E5M2`, `MX_E2M3`, `MX_E3M2`, `MX_E2M1`, and `MX_E8M0`, respectively.
