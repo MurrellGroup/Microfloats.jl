@@ -1,15 +1,13 @@
 module Microfloats
 
 import BFloat16s: BFloat16
-
 export BFloat16
 
 include("Microfloat.jl")
 include("conversion.jl")
-export OVF, SAT
-
 include("show.jl")
 include("ops.jl")
+include("random.jl")
 
 """
     Microfloat(S, E, M, V=IEEE)
@@ -40,5 +38,7 @@ export OVF, SAT
 export Float8_E3M4, Float8_E4M3, Float8_E5M2
 export Float6_E2M3, Float6_E3M2
 export Float4_E2M1
+
+include("MX.jl")
 
 end
