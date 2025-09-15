@@ -12,7 +12,7 @@ end
 
 is_outside_floatmax(x::T) where {T<:Microfloat} = reinterpret(Unsigned, abs(x)) > reinterpret(Unsigned, floatmax(T))
 clamp_floatmax(x::T) where {T<:Microfloat} = signbit(x) ? -floatmax(T) : floatmax(T)
-clamp_inf(x::T) where {T<:Microfloat} = signbit(x) ? -inf(T) : inf(T)
+clamp_typemax(x::T) where {T<:Microfloat} = signbit(x) ? -typemax(T) : typemax(T)
 
 function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:OverflowPolicy}
     if P <: SAT
@@ -27,7 +27,7 @@ function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:Overflo
         if isnan(xb)
             return nan(T)
         elseif isinf(xb) || is_outside_floatmax(x)
-            return hasinf(T) ? clamp_inf(x) : nan(T)
+            return hasinf(T) ? clamp_typemax(x) : nan(T)
         else
             return x
         end
@@ -103,9 +103,6 @@ function to_bfloat16(x::T) where {T<:Microfloat}
 
     M = significand_bits(T)
     bias = exponent_bias(T)
-
-    local t_significand_total::UInt16
-    local t_true_exponent::Int
 
     if t_exponent_field == 0 # Subnormal
         nlz = M - 1 - floor(Int, log2(t_fraction_field))

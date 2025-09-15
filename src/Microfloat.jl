@@ -29,8 +29,8 @@ exponent_bias(::Type{T}) where T<:Microfloat = 2^(exponent_bits(T) - 1) - 1
 hasinf(::Type{T}) where T<:Microfloat = true
 hasnan(::Type{T}) where T<:Microfloat = true
 
-inf(::Type{T}) where T<:Microfloat = hasinf(T) ? reinterpret(T, exponent_mask(T)) : throw(DomainError(T, "$T has no Inf"))
-nan(::Type{T}) where T<:Microfloat = hasnan(T) ? reinterpret(T, exponent_mask(T) | 0x01 << (significand_bits(T) - 1)) : throw(DomainError(T, "$T has no NaN"))
+inf(::Type{T}) where T<:Microfloat = hasinf(T) ? reinterpret(T, exponent_mask(T)) : throw(DomainError(T, lazy"$T has no Inf"))
+nan(::Type{T}) where T<:Microfloat = hasnan(T) ? reinterpret(T, exponent_mask(T) | 0x01 << (significand_bits(T) - 1)) : throw(DomainError(T, lazy"$T has no NaN"))
 
 Base.isinf(x::T) where T<:Microfloat = hasinf(T) && reinterpret(Unsigned, x) & exponent_mask(T) == exponent_mask(T) && iszero(reinterpret(Unsigned, x) & significand_mask(T))
 Base.isnan(x::T) where T<:Microfloat = hasnan(T) && reinterpret(Unsigned, x) & exponent_mask(T) == exponent_mask(T) && !iszero(reinterpret(Unsigned, x) & significand_mask(T))

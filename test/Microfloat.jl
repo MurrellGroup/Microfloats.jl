@@ -27,11 +27,6 @@ const TYPES = [
     Microfloat(1, 2, 1),
 ]
 
-function all_values(::Type{T}) where T<:Microfloat
-    N = Microfloats.n_utilized_bits(T)
-    return [reinterpret(T, UInt8(u)) for u in 0:2^N-1]
-end
-
 @testset "Microfloat" begin
 
     @testset for T in TYPES
