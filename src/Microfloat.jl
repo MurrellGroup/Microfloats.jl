@@ -7,9 +7,18 @@ import Base:
 sign_bits(::Type{<:AbstractFloat}) = 1
 total_bits(::Type{T}) where T<:AbstractFloat = sign_bits(T) + exponent_bits(T) + significand_bits(T)
 
-abstract type FloatVariant end
+# The `Finite` abstract type serves as a trait to define the representation and
+# behavior of microfloats. The base `Finite` type defines a number system with
+# no canonical `Inf` or `NaN` values.
+#
+# Other variants, such as IEEE-754 or MX, can subtype `Finite` to override
+# default behaviors and introduce support for non-finite values. See
+# `src/IEEE.jl` and `src/MX.jl` for examples.
+abstract type Finite end
 
-primitive type Microfloat{S,E,M,V<:FloatVariant} <: AbstractFloat 8 end
+primitive type Microfloat{S,E,M,V<:Finite} <: AbstractFloat 8 end
+
+Base.:*(x::AbstractFloat, ::Type{T}) where T<:Microfloat = T(x)
 
 reinterpret(::Type{Unsigned}, x::Microfloat) = reinterpret(UInt8, x)
 
@@ -26,27 +35,27 @@ signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && reinterpret(Unsigned, x) & 
 exponent(x::Microfloat) = Int((reinterpret(Unsigned, x) & exponent_mask(typeof(x))) >> significand_bits(typeof(x)))
 exponent_bias(::Type{T}) where T<:Microfloat = 2^(exponent_bits(T) - 1) - 1
 
-hasinf(::Type{T}) where T<:Microfloat = true
-hasnan(::Type{T}) where T<:Microfloat = true
+hasinf(::Type{<:Microfloat}) = false
+hasnan(::Type{<:Microfloat}) = false
 
-inf(::Type{T}) where T<:Microfloat = hasinf(T) ? reinterpret(T, exponent_mask(T)) : throw(DomainError(T, lazy"$T has no Inf"))
-nan(::Type{T}) where T<:Microfloat = hasnan(T) ? reinterpret(T, exponent_mask(T) | 0x01 << (significand_bits(T) - 1)) : throw(DomainError(T, lazy"$T has no NaN"))
+inf(::Type{T}) where T<:Microfloat = throw(DomainError(T, lazy"$T has no Inf"))
+nan(::Type{T}) where T<:Microfloat = throw(DomainError(T, lazy"$T has no NaN"))
 
-Base.isinf(x::T) where T<:Microfloat = hasinf(T) && reinterpret(Unsigned, x) & exponent_mask(T) == exponent_mask(T) && iszero(reinterpret(Unsigned, x) & significand_mask(T))
-Base.isnan(x::T) where T<:Microfloat = hasnan(T) && reinterpret(Unsigned, x) & exponent_mask(T) == exponent_mask(T) && !iszero(reinterpret(Unsigned, x) & significand_mask(T))
+Base.isinf(::Microfloat) = false
+Base.isnan(::Microfloat) = false
 
-Base.typemin(::Type{T}) where T<:Microfloat = hasinf(T) ? -inf(T) : -floatmax(T)
 Base.typemin(::Type{T}) where T<:Microfloat{0} = zero(T)
+Base.typemin(::Type{T}) where T<:Microfloat = hasinf(T) ? -inf(T) : -floatmax(T)
 Base.typemax(::Type{T}) where T<:Microfloat = hasinf(T) ? inf(T) : floatmax(T)
+
+Base.floatmin(::Type{T}) where T<:Microfloat = exponent_bits(T) > 1 ? reinterpret(T, one(UInt8) << significand_bits(T)) : throw(DomainError(T, "$T has no normal numbers"))
+Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, exponent_mask(T) | significand_mask(T))
 
 Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
 Base.one(::Type{T}) where T<:Microfloat = T(true)
 
 Base.eps(x::Microfloat) = max(x-prevfloat(x), nextfloat(x)-x)
 Base.eps(T::Type{<:Microfloat}) = eps(one(T))
-
-Base.floatmin(::Type{T}) where T<:Microfloat = exponent_bits(T) > 1 ? reinterpret(T, one(UInt8) << significand_bits(T)) : throw(DomainError(T, "$T has no normal numbers"))
-Base.floatmax(::Type{T}) where T<:Microfloat = reinterpret(T, exponent_mask(T) - 0x01 << significand_bits(T) | significand_mask(T))
 
 Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(Unsigned, x) & ~sign_mask(T))
 Base.iszero(x::T) where T<:Microfloat = abs(x) === zero(T)

@@ -12,7 +12,7 @@ end
 
 is_outside_floatmax(x::T) where {T<:Microfloat} = reinterpret(Unsigned, abs(x)) > reinterpret(Unsigned, floatmax(T))
 clamp_floatmax(x::T) where {T<:Microfloat} = signbit(x) ? -floatmax(T) : floatmax(T)
-clamp_typemax(x::T) where {T<:Microfloat} = signbit(x) ? -typemax(T) : typemax(T)
+clamp_inf(x::T) where {T<:Microfloat} = signbit(x) ? -inf(T) : inf(T)
 
 function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:OverflowPolicy}
     if P <: SAT
@@ -27,7 +27,7 @@ function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:Overflo
         if isnan(xb)
             return nan(T)
         elseif isinf(xb) || is_outside_floatmax(x)
-            return hasinf(T) ? clamp_typemax(x) : nan(T)
+            return hasinf(T) ? clamp_inf(x) : nan(T)
         else
             return x
         end
@@ -81,7 +81,8 @@ function (::Type{T})(x::BFloat16, ::Type{P}=OVF) where {T<:Microfloat,P<:Overflo
     return epilogue(reinterpret(T, t_raw), x, P)
 end
 
-(::Type{T})(x, args...) where {T<:Microfloat} = T(BFloat16(x), args...)
+(::Type{T})(x::Number, args...) where {T<:Microfloat} = T(BFloat16(x), args...)
+(::Type{T})(::Type{P}) where {T<:Microfloat,P<:OverflowPolicy} = x -> T(x, P)
 
 function to_bfloat16(x::T) where {T<:Microfloat}
     t_raw = reinterpret(UInt8, x)
