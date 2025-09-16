@@ -64,14 +64,14 @@ for T in (
             $($T)
 
         ## Properties
-        - Bits: $(sign_bits($T)) sign + $(exponent_bits($T)) exponent + $(significand_bits($T)) significand ($(total_bits($T)) total)
-        - Variant: $(variant($T))
-        - Has Inf: $(hasinf($T))
-        - Has NaN: $(hasnan($T))
-        - Max normal: $(Float64(floatmax($T)))
-        - Min normal: $(Float64(floatmin($T)))
-        - Max subnormal: $(Float64(prevfloat(floatmin($T))))
-        - Min subnormal: $(Float64(nextfloat(zero($T))))
+        - Bits: `$(sign_bits($T))` sign + `$(exponent_bits($T))` exponent + `$(significand_bits($T))` significand (`$(total_bits($T))` total)
+        - Variant: `$(variant($T))`
+        - Has Inf: `$(hasinf($T))`
+        - Has NaN: `$(hasnan($T))`
+        - Max normal: `$(Float64(floatmax($T)))`
+        - Min normal: `$(Float64(floatmin($T)))`
+        - Max subnormal: `$(Float64(prevfloat(floatmin($T))))`
+        - Min subnormal: `$(Float64(nextfloat(zero($T))))`
         """
         $T
     end
