@@ -3,11 +3,12 @@ abstract type SAT <: OverflowPolicy end
 abstract type OVF <: OverflowPolicy end
 
 function rshift_round_to_even(x::UInt16, n::Int)
-    n <= 0 && return x << (-n)
-    lower = x & ((UInt16(1) << n) - UInt16(1))
-    half = UInt16(1) << (n - 1)
-    up = (lower > half) | ((lower == half) & (((x >> n) & UInt16(1)) == UInt16(1)))
-    (x >> n) + (up ? UInt16(1) : UInt16(0))
+    n <= 0 && return x >> n
+    x_32 = UInt32(x)
+    lower = x_32 & ((UInt32(1) << n) - UInt32(1))
+    half = UInt32(1) << (n - 1)
+    up = (lower > half) | ((lower == half) & (((x_32 >> n) & UInt32(1)) == UInt32(1)))
+    UInt16((x_32 >> n) + (up ? 1 : 0))
 end
 
 is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat = reinterpret(Unsigned, abs(xb)) > reinterpret(Unsigned, BFloat16(floatmax(T)))
