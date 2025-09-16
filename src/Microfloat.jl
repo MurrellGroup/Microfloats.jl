@@ -4,12 +4,7 @@ import Base:
     sign_mask, exponent_mask, significand_mask,
     signbit, exponent, exponent_bias
 
-sign_bits(::Type{<:AbstractFloat}) = 1
-total_bits(::Type{T}) where T<:AbstractFloat = sign_bits(T) + exponent_bits(T) + significand_bits(T)
-
 primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
-
-Base.:*(x::AbstractFloat, ::Type{T}) where T<:Microfloat = T(x)
 
 reinterpret(::Type{Unsigned}, x::Microfloat) = reinterpret(UInt8, x)
 

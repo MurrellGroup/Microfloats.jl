@@ -4,7 +4,6 @@ import BFloat16s: BFloat16
 export BFloat16
 
 include("Microfloat.jl")
-export Finite
 export Microfloat
 
 include("variants/Finite.jl")
