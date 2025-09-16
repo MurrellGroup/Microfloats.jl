@@ -14,6 +14,8 @@ makedocs(;
     ),
     pages=[
         "Home" => "index.md",
+        "Microfloats" => "microfloats.md",
+        "Conversion" => "conversion.md",
     ],
 )
 

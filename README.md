@@ -1,4 +1,4 @@
-# Microfloats
+# <img src="docs/src/assets/icon.svg" width="200" align="right"> Microfloats
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://MurrellGroup.github.io/Microfloats.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://MurrellGroup.github.io/Microfloats.jl/dev/)
@@ -11,16 +11,21 @@ Instances of a sub-8 bit floating point type are still 8 bits wide in memory; th
 
 ## Usage
 
-We can recreate the `Float8` and `Float8_4` types exported by Float8s.jl through the `Microfloat` type constructor, which takes the number of sign, exponent, and mantissa bits as arguments:
+Along with the types already exported by Microfloats, we can also create our own types by passing the number of sign, exponent, and mantissa bits to the `Microfloat` type constructor. For example, one can recreate the `Float8` and `Float8_4` types exported by Float8s.jl:
 
 ```julia
 using Microfloats
 
-const Float8 = Microfloat(1, 3, 4)
-const Float8_4 = Microfloat(1, 4, 3)
+const Float8 = Microfloat{1,3,4,IEEE_754_like}
+const Float8_4 = Microfloat{1,4,3,IEEE_754_like}
 
 # creating a sawed-off Float16 (BFloat8?) becomes trivial:
-const Float8_5 = Microfloat(1, 5, 2)
+const Float8_5 = Microfloat{1,5,2,IEEE_754_like}
+
+# unsigned variants:
+const UFloat7 = Microfloat{0,3,4,IEEE_754_like}
+const UFloat7_4 = Microfloat{0,4,3,IEEE_754_like}
+const UFloat7_5 = Microfloat{0,5,2,IEEE_754_like}
 ```
 
 ### Microscaling (MX)

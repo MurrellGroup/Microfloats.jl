@@ -3,34 +3,29 @@ using Microfloats
 using Random
 
 const TYPES = [
-    Microfloat(0, 3, 4),
-    Microfloat(0, 4, 3),
-    Microfloat(0, 3, 3),
-    Microfloat(0, 4, 2),
-    Microfloat(0, 5, 1),
-    Microfloat(0, 3, 2),
-    Microfloat(0, 2, 3),
-    Microfloat(0, 2, 2),
-    Microfloat(0, 3, 1),
-    Microfloat(0, 1, 3),
-    Microfloat(0, 2, 1),
-    Microfloat(1, 3, 4),
-    Microfloat(1, 4, 3),
-    Microfloat(1, 3, 3),
-    Microfloat(1, 4, 2),
-    Microfloat(1, 5, 1),
-    Microfloat(1, 3, 2),
-    Microfloat(1, 2, 3),
-    Microfloat(1, 2, 2),
-    Microfloat(1, 3, 1),
-    Microfloat(1, 1, 3),
-    Microfloat(1, 2, 1),
+    Microfloat{0, 3, 4, IEEE_754_like},
+    Microfloat{0, 4, 3, IEEE_754_like},
+    Microfloat{0, 3, 3, IEEE_754_like},
+    Microfloat{0, 4, 2, IEEE_754_like},
+    Microfloat{0, 5, 1, IEEE_754_like},
+    Microfloat{0, 3, 2, IEEE_754_like},
+    Microfloat{0, 2, 3, IEEE_754_like},
+    Microfloat{0, 2, 2, IEEE_754_like},
+    Microfloat{0, 3, 1, IEEE_754_like},
+    Microfloat{0, 1, 3, IEEE_754_like},
+    Microfloat{0, 2, 1, IEEE_754_like},
+    Microfloat{1, 3, 4, IEEE_754_like},
+    Microfloat{1, 4, 3, IEEE_754_like},
+    Microfloat{1, 3, 3, IEEE_754_like},
+    Microfloat{1, 4, 2, IEEE_754_like},
+    Microfloat{1, 5, 1, IEEE_754_like},
+    Microfloat{1, 3, 2, IEEE_754_like},
+    Microfloat{1, 2, 3, IEEE_754_like},
+    Microfloat{1, 2, 2, IEEE_754_like},
+    Microfloat{1, 3, 1, IEEE_754_like},
+    Microfloat{1, 1, 3, IEEE_754_like},
+    Microfloat{1, 2, 1, IEEE_754_like},
 ]
-
-function all_values(::Type{T}) where T<:Microfloat
-    N = Microfloats.n_utilized_bits(T)
-    return [reinterpret(T, UInt8(u)) for u in 0:2^N-1]
-end
 
 @testset "Microfloat" begin
 
@@ -42,8 +37,8 @@ end
         @test nextfloat(zero(T)) > zero(T)
         @test isfinite(prevfloat(T(Inf)))
 
-        if Microfloats.n_exponent_bits(T) > 1
-            @test floatmin(T) == reinterpret(T, 0x01 << Microfloats.exponent_offset(T))
+        if Base.exponent_bits(T) > 1
+            @test floatmin(T) == reinterpret(T, 0x01 << Base.significand_bits(T))
         else
             @test_throws DomainError floatmin(T)
         end
@@ -66,21 +61,25 @@ end
             @test typemin(T) == zero(T)
         end
 
-        @test precision(T) == Microfloats.n_mantissa_bits(T) + 1
+        @test precision(T) == Base.significand_bits(T) + 1
     end
 end
 
 @testset "IEEE microfloats: subnormals and rounding" begin
     @testset for T in TYPES
-        bias = Microfloats.exponent_bias(T)
-        M = Microfloats.n_mantissa_bits(T)
-        mo = Microfloats.mantissa_offset(T)
-        # Encoding for the minimum positive subnormal (mantissa LSB only)
-        min_sub_u = UInt8(1) << mo
+        @test !issubnormal(zero(T))
+        @test issubnormal(nextfloat(zero(T)))
+
+        if Base.exponent_bits(T) > 1
+            @test issubnormal(prevfloat(floatmin(T)))
+            @test !issubnormal(floatmin(T))
+        end
+
+        min_sub_u = 0x01
         min_sub = reinterpret(T, min_sub_u)
 
         # Real values
-        min_sub_val = Float32(2.0)^(1 - bias - M)
+        min_sub_val = BFloat16(2.0)^(1 - Microfloats.exponent_bias(T) - Base.significand_bits(T))
         half = min_sub_val/2
         just_below_half = prevfloat(half)
         just_above_half = nextfloat(half)
@@ -88,7 +87,7 @@ end
         just_above = nextfloat(min_sub_val)
 
         # Exact min subnormal
-        @test Float32(min_sub) == min_sub_val
+        @test BFloat16(min_sub) == min_sub_val
 
         # Values well below half of min subnormal should round to +0
         @test T(half/4) == zero(T)
@@ -100,12 +99,12 @@ end
         # Values just above half of min subnormal should round to min subnormal
         @test T(just_above_half) == min_sub
 
-        # Values just below min subnormal remain min subnormal after rounding up from Float32
+        # Values just below min subnormal remain min subnormal after rounding up from BFloat16
         @test T(just_below) == min_sub
 
         # Values just above min subnormal quantize to min subnormal or the next representable
         # depending on spacing; at least should be >= min_sub
-        @test Float32(T(just_above)) >= min_sub_val
+        @test BFloat16(T(just_above)) >= min_sub_val
     end
 end
 
@@ -116,7 +115,7 @@ end
             x = reinterpret(T, u)
             isnan(x) && continue
             # Only include canonical encodings: padding bits outside fields are zero
-            used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.mantissa_mask(T))
+            used_mask = Microfloats.sign_mask(T) | Base.exponent_mask(T) | Base.significand_mask(T)
             ((u & ~used_mask) != 0x00) && continue
             push!(vals, (u, Float32(x), x))
         end
@@ -141,7 +140,7 @@ end
             @test all(x -> isfinite(x), xs)
             @test any(x -> x != zero(T), xs)  # likely non-degenerate
         end
-        if Microfloats.n_sign_bits(T) == 1
+        if Microfloats.sign_bits(T) == 1
             @testset "$T randn()" begin
                 xs = randn(rng, T, 1000)
                 @test all(isfinite, xs)

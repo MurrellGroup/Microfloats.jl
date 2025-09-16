@@ -1,9 +1,10 @@
 name = "Microfloats"
 uuid = "31c70f10-a750-4521-b13c-797315ae2933"
 authors = ["Anton Oresten <antonoresten@gmail.com> and contributors"]
-version = "0.0.8"
+version = "0.0.9"
 
 [deps]
+BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [weakdeps]
@@ -13,6 +14,7 @@ BitPacking = "b58c8408-13c4-4787-8733-7038ae624acf"
 BitPackingExt = "BitPacking"
 
 [compat]
+BFloat16s = "0.5"
 BitPacking = "0.1"
 Random = "1"
 julia = "1.10"

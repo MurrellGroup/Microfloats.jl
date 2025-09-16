@@ -1,7 +1,7 @@
 import Random
 
 # Draw a Uniform(0,1) value for Microfloats via the CloseOpen01 sampler
-function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerTrivial{Random.CloseOpen01{T}, T}) where {T<:Microfloat}
+function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerTrivial{Random.CloseOpen01{T}, T}) where T<:Microfloat
     return T(rand(rng, Random.CloseOpen01(Float32)))
 end
 
