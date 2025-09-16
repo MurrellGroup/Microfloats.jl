@@ -47,9 +47,12 @@ A `Microfloat` type has `S` sign bits (between 0 and 1),
 Microfloat
 
 """
-    OVF
+    SAT
+"""
+SAT
 
-Overflow policy for converting from BFloat16 to a `Microfloat`.
+"""
+    OVF
 """
 OVF
 

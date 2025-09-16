@@ -1,6 +1,6 @@
 abstract type OverflowPolicy end
-abstract type OVF <: OverflowPolicy end
 abstract type SAT <: OverflowPolicy end
+abstract type OVF <: OverflowPolicy end
 
 function rshift_round_to_even(x::UInt16, n::Int)
     n <= 0 && return x << (-n)
