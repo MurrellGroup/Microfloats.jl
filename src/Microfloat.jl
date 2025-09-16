@@ -7,16 +7,7 @@ import Base:
 sign_bits(::Type{<:AbstractFloat}) = 1
 total_bits(::Type{T}) where T<:AbstractFloat = sign_bits(T) + exponent_bits(T) + significand_bits(T)
 
-# The `Finite` abstract type serves as a trait to define the representation and
-# behavior of microfloats. The base `Finite` type defines a number system with
-# no canonical `Inf` or `NaN` values.
-#
-# Other variants, such as IEEE-754 or MX, can subtype `Finite` to override
-# default behaviors and introduce support for non-finite values. See
-# `src/IEEE.jl` and `src/MX.jl` for examples.
-abstract type Finite end
-
-primitive type Microfloat{S,E,M,V<:Finite} <: AbstractFloat 8 end
+primitive type Microfloat{S,E,M,V} <: AbstractFloat 8 end
 
 Base.:*(x::AbstractFloat, ::Type{T}) where T<:Microfloat = T(x)
 
@@ -102,5 +93,9 @@ end
 
 Base.decompose(x::T) where T<:Microfloat = Base.decompose(BFloat16(x))
 
+Base.widen(::Type{T}) where T<:Microfloat = BFloat16
+
 Base.promote_rule(::Type{M}, ::Type{T}) where {M<:Microfloat,T<:Union{BFloat16,Float16,Float32,Float64}} = T
 Base.promote_rule(::Type{M}, ::Type{T}) where {M<:Microfloat,T<:Integer} = M
+Base.promote_rule(::Type{M}, ::Type{M}) where {M<:Microfloat} = M
+Base.promote_rule(::Type{<:Microfloat}, ::Type{<:Microfloat}) = BFloat16

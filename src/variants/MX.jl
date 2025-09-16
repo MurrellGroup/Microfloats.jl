@@ -1,4 +1,7 @@
-abstract type MX <: Finite end
+"""
+    MX
+"""
+abstract type MX end
 
 const MXFloat{S,E,M} = Microfloat{S,E,M,MX}
 

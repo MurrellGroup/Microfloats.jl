@@ -10,15 +10,15 @@ function rshift_round_to_even(x::UInt16, n::Int)
     (x >> n) + (up ? UInt16(1) : UInt16(0))
 end
 
-is_outside_floatmax(x::T) where {T<:Microfloat} = reinterpret(Unsigned, abs(x)) > reinterpret(Unsigned, floatmax(T))
-clamp_floatmax(x::T) where {T<:Microfloat} = signbit(x) ? -floatmax(T) : floatmax(T)
-clamp_inf(x::T) where {T<:Microfloat} = signbit(x) ? -inf(T) : inf(T)
+is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat = reinterpret(Unsigned, abs(xb)) > reinterpret(Unsigned, BFloat16(floatmax(T)))
+clamp_floatmax(x::T) where T<:Microfloat = signbit(x) ? -floatmax(T) : floatmax(T)
+clamp_inf(x::T) where T<:Microfloat = signbit(x) ? -inf(T) : inf(T)
 
 function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:OverflowPolicy}
     if P <: SAT
         if isnan(xb)
             return nan(T)
-        elseif isinf(xb) || is_outside_floatmax(x)
+        elseif isinf(xb) || is_outside_floatmax(xb, T)
             return clamp_floatmax(x)
         else
             return x
@@ -26,7 +26,7 @@ function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:Overflo
     elseif P <: OVF
         if isnan(xb)
             return nan(T)
-        elseif isinf(xb) || is_outside_floatmax(x)
+        elseif isinf(xb) || is_outside_floatmax(xb, T)
             return hasinf(T) ? clamp_inf(x) : nan(T)
         else
             return x
@@ -34,7 +34,9 @@ function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:Overflo
     end
 end
 
-function (::Type{T})(x::BFloat16, ::Type{P}=OVF) where {T<:Microfloat,P<:OverflowPolicy}
+default_overflow_policy(::Type{T}) where T = hasnan(T) ? OVF : SAT
+
+function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T<:Microfloat,P<:OverflowPolicy}
     iszero(x) && return zero(T)
 
     bf16_exp  = Int((reinterpret(Unsigned, x) >> 7) & 0x00ff)

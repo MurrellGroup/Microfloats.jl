@@ -16,19 +16,19 @@ We can recreate the `Float8` and `Float8_4` types exported by Float8s.jl through
 ```julia
 using Microfloats
 
-const Float8 = Microfloat(1, 3, 4)
-const Float8_4 = Microfloat(1, 4, 3)
+const Float8 = Microfloat{1, 3, 4, IEEE_754_like}
+const Float8_4 = Microfloat{1, 4, 3, IEEE_754_like}
 
 # creating a sawed-off Float16 (BFloat8?) becomes trivial:
-const Float8_5 = Microfloat(1, 5, 2)
+const Float8_5 = Microfloat{1, 5, 2, IEEE_754_like}
 ```
 
 and why don't we remove the sign bit?
 
 ```julia
-const UFloat7 = Microfloat(0, 3, 4)
-const UFloat7_4 = Microfloat(0, 4, 3)
-const UFloat7_5 = Microfloat(0, 5, 2)
+const UFloat7 = Microfloat{0, 3, 4, IEEE_754_like}
+const UFloat7_4 = Microfloat{0, 4, 3, IEEE_754_like}
+const UFloat7_5 = Microfloat{0, 5, 2, IEEE_754_like}
 ```
 
 ### Microscaling (MX)

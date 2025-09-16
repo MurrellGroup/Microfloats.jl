@@ -6,9 +6,13 @@ CurrentModule = Microfloats
 
 Documentation for [Microfloats](https://github.com/MurrellGroup/Microfloats.jl).
 
-```@index
+## Contents
+
+```@contents
+Pages = ["index.md", "microfloat.md", "conversion.md"]
 ```
 
-```@autodocs
-Modules = [Microfloats]
+## Index
+
+```@index
 ```

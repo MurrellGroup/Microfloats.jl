@@ -1,6 +1,9 @@
-abstract type IEEE <: Finite end
+"""
+    IEEE_754_like
+"""
+abstract type IEEE_754_like end
 
-const IEEEFloat{S,E,M} = Microfloat{S,E,M,IEEE}
+const IEEEFloat{S,E,M} = Microfloat{S,E,M,IEEE_754_like}
 
 hasinf(::Type{<:IEEEFloat}) = true
 hasnan(::Type{<:IEEEFloat}) = true
