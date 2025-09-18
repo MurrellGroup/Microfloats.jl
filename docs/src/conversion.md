@@ -4,7 +4,7 @@
 ## BFloat16
 
 Conversion to and from `Microfloat` uses `BFloat16` as an intermediate type,
-since BFloat16 has 1 sign bit, 8 exponent bits, and 7 significand bits,
+since BFloat16 has 1 sign bit, 8 exponent bits, and 7 significand (mantissa) bits,
 and is therefore able to represent all `Microfloat` types.
 
 ## Rounding
