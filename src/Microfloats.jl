@@ -41,7 +41,7 @@ include("random.jl")
     Microfloat{S,E,M,V}
 
 A `Microfloat` type has `S` sign bits (between 0 and 1),
-`E` exponent bits (between 1 and 8), and `M` significand bits (between 0 and 7).
+`E` exponent bits (between 1 and 8), and `M` mantissa bits (between 0 and 7).
 """
 Microfloat
 
@@ -70,8 +70,8 @@ for T in (
         - Has NaN: `$(hasnan($T))`
         - Max normal: `$(Float64(floatmax($T)))`
         - Min normal: `$(Float64(floatmin($T)))`
-        - Max subnormal: `$(Float64(prevfloat(floatmin($T))))`
-        - Min subnormal: `$(Float64(nextfloat(zero($T))))`
+        - Max subnormal: `$(signficiand_bits($T) > 0 ? Float64(prevfloat(floatmin($T))) : "N/A")`
+        - Min subnormal: `$(signficiand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
         """
         $T
     end
