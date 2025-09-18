@@ -70,8 +70,8 @@ for T in (
         - Has NaN: `$(hasnan($T))`
         - Max normal: `$(Float64(floatmax($T)))`
         - Min normal: `$(Float64(floatmin($T)))`
-        - Max subnormal: `$(signficiand_bits($T) > 0 ? Float64(prevfloat(floatmin($T))) : "N/A")`
-        - Min subnormal: `$(signficiand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
+        - Max subnormal: `$(significand_bits($T) > 0 ? Float64(prevfloat(floatmin($T))) : "N/A")`
+        - Min subnormal: `$(significand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
         """
         $T
     end
