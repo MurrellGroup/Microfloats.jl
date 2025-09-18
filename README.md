@@ -30,12 +30,12 @@ const UFloat7_5 = Microfloat{0,5,2,IEEE_754_like}
 
 ### Microscaling (MX)
 
-Microfloats implements the E4M3, E5M2, E2M3, E3M2, E2M1, and E8M0 types from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf), with most of these using saturated arithmetic (no infinities), and different bit layouts for NaNs. These are exported as `MX_E4M3`, `MX_E5M2`, `MX_E2M3`, `MX_E3M2`, `MX_E2M1`, and `MX_E8M0`, respectively.
+Microfloats implements the E4M3, E5M2, E2M3, E3M2, E2M1, and E8M0 types from the [Open Compute Project Microscaling Formats (MX) Specification](https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf) These are exported as `MX_E4M3`, `MX_E5M2`, `MX_E2M3`, `MX_E3M2`, `MX_E2M1`, and `MX_E8M0`, respectively, with most of these using saturated arithmetic (no Inf or NaN), and a different encoding for the types that do have NaNs.
 
 For INT8, see `FixedPointNumbers.Q1f6`.
 
-> [!WARNING]
-> MX types may not yet be fully OCP compliant. See issues with the [![MX-compliance](https://img.shields.io/github/labels/MurrellGroup/Microfloats.jl/mx-compliance)](https://github.com/MurrellGroup/Microfloats.jl/labels/mx-compliance) label.
+> [!NOTE]
+> MX types may not be fully MX compliant, but efforts have been and continue to be made to adhere to the specification. See issues with the [![MX-compliance](https://img.shields.io/github/labels/MurrellGroup/Microfloats.jl/mx-compliance)](https://github.com/MurrellGroup/Microfloats.jl/labels/mx-compliance) label.
 
 Since Microfloats.jl only implements the primitive types, microscaling itself may be done with [Microscaling.jl](https://github.com/MurrellGroup/Microscaling.jl), which includes quantization and bitpacking.
 
