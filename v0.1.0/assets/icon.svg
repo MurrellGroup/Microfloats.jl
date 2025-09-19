@@ -1,0 +1,37 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 400 200"
+  width="400"
+  height="200"
+  aria-labelledby="title desc"
+  role="img"
+>
+
+  <!-- Julia palette -->
+  <!-- Blue  : #4063D8  | Green : #389826  | Purple : #9558B2  | Red : #CB3C33 -->
+
+  <title id="title">Microfloats.jl mark</title>
+  <desc id="desc">
+    Two base circles (red left, purple right), a symmetric blue sine wave above them,
+    and a small (micro) green circle floating above the wave’s center crest.
+  </desc>
+
+
+  <!-- Bottom circles (adjust cx/cy/r for proportions) -->
+  <circle cx="99" cy="116" r="42" fill="#CB3C33" />  <!-- red, bottom-left -->
+  <circle cx="301" cy="116" r="42" fill="#9558B2" />  <!-- purple, bottom-right -->
+
+  <!-- Blue sine wave -->
+  <path
+    d="M 50 -44 Q 75 -66 100 -66 Q 125 -66 150 -40 Q 200 16 250 -40 Q 275 -66 300 -66 Q 325 -66 350 -44"
+    fill="none"
+    stroke="#4063d8"
+    stroke-width="24"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    transform="translate(0, 120)"
+  />
+
+  <!-- Micro-floating green circle -->
+  <circle cx="200" cy="72" r="18" fill="#389826" />
+</svg>
