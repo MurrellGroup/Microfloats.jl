@@ -14,7 +14,7 @@ BitPacking = "b58c8408-13c4-4787-8733-7038ae624acf"
 BitPackingExt = "BitPacking"
 
 [compat]
-BFloat16s = "0.5"
+BFloat16s = "0.5, 0.6"
 BitPacking = "0.1"
 Random = "1"
 julia = "1.10"
