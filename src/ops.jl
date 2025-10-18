@@ -1,8 +1,6 @@
 import Base: (<), (<=), isless, (==)
 
 for op in (:<, :<=, :isless, :(==))
-    @eval ($op)(a::Microfloat, b::Real) = ($op)(Float32(a), Float32(b))
-    @eval ($op)(a::Real, b::Microfloat) = ($op)(Float32(a), Float32(b))
     @eval ($op)(a::Microfloat, b::Microfloat) = ($op)(Float32(a), Float32(b))
 end
 
@@ -10,8 +8,6 @@ end
 import Base: (+), (-), (*), (/), (\), (^)
 
 for op in (:+, :-, :*, :/, :\, :^)
-    @eval ($op)(a::Microfloat, b::Number) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
-    @eval ($op)(a::Number, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
     @eval ($op)(a::Microfloat, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
 end
 
