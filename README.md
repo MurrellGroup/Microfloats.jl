@@ -16,16 +16,19 @@ Along with the types already exported by Microfloats, we can also create our own
 ```julia
 using Microfloats
 
-const Float8 = Microfloat{1,3,4,IEEE_754_like}
-const Float8_4 = Microfloat{1,4,3,IEEE_754_like}
+# IEEE_754_like variant for {Float64,Float32,Float16}-like overflowing
+const MicrofloatIEEE{S,E,M} = Microfloat{S,E,M,IEEE_754_like}
+
+const Float8 = MicrofloatIEEE{1,3,4}
+const Float8_4 = MicrofloatIEEE{1,4,3}
 
 # creating a sawed-off Float16 (BFloat8?) becomes trivial:
-const Float8_5 = Microfloat{1,5,2,IEEE_754_like}
+const Float8_5 = MicrofloatIEEE{1,5,2}
 
 # unsigned variants:
-const UFloat7 = Microfloat{0,3,4,IEEE_754_like}
-const UFloat7_4 = Microfloat{0,4,3,IEEE_754_like}
-const UFloat7_5 = Microfloat{0,5,2,IEEE_754_like}
+const UFloat7 = MicrofloatIEEE{0,3,4}
+const UFloat7_4 = MicrofloatIEEE{0,4,3}
+const UFloat7_5 = MicrofloatIEEE{0,5,2}
 ```
 
 ### Microscaling (MX)
