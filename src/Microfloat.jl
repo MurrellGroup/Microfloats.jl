@@ -1,15 +1,13 @@
 import Base: signbit, exponent
 
 """
-    Microfloat{S,E,M} <: AbstractFloat
+    Microfloat <: AbstractFloat
 
 Abstract type for floating-point numbers that fit within a single byte.
 
 See [`@microfloat`](@ref) for type declaration.
 """
-abstract type Microfloat{S,E,M} <: AbstractFloat end
-
-float_bits(::Type{<:Microfloat{S,E,M}}) where {S,E,M} = (S,E,M)
+abstract type Microfloat <: AbstractFloat end
 
 sign_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << sign_bits(T) - 0x01) << (exponent_bits(T) + significand_bits(T)))
 exponent_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << exponent_bits(T) - 0x01) << significand_bits(T))
@@ -127,8 +125,8 @@ _floatmax(::Type{FiniteOnly}, ::Type{T}) where T<:Microfloat =
 
 # ───────────────────────── generic Base methods ──────────────────────────
 
-Base.typemin(::Type{T}) where T<:Microfloat{0} = zero(T)
-Base.typemin(::Type{T}) where T<:Microfloat = hasinf(T) ? -inf(T) : -floatmax(T)
+Base.typemin(::Type{T}) where T<:Microfloat =
+    sign_bits(T) == 0 ? zero(T) : hasinf(T) ? -inf(T) : -floatmax(T)
 Base.typemax(::Type{T}) where T<:Microfloat = hasinf(T) ? inf(T) : floatmax(T)
 
 Base.floatmin(::Type{T}) where T<:Microfloat =
@@ -143,8 +141,9 @@ Base.eps(T::Type{<:Microfloat}) = eps(one(T))
 
 Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(Unsigned, x) & ~sign_mask(T))
 Base.iszero(x::T) where T<:Microfloat = significand_bits(T) == 0 ? false : abs(x) === zero(T)
-Base.:(-)(x::T) where T<:Microfloat{0} = throw(DomainError(x, "cannot negate unsigned $T"))
-Base.:(-)(x::T) where T<:Microfloat = reinterpret(T, sign_mask(T) ⊻ reinterpret(Unsigned, x))
+Base.:(-)(x::T) where T<:Microfloat =
+    sign_bits(T) == 0 ? throw(DomainError(x, "cannot negate unsigned $T")) :
+    reinterpret(T, sign_mask(T) ⊻ reinterpret(Unsigned, x))
 Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
 Base.precision(::Type{T}) where T<:Microfloat = significand_bits(T) + 1

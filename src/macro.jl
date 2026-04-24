@@ -64,8 +64,9 @@ macro microfloat(name, kwargs...)
     N = S + E + M
 
     quote
-        Base.@__doc__ primitive type $T <: $Microfloat{$S,$E,$M} 8 end
+        Base.@__doc__ primitive type $T <: $Microfloat 8 end
         $_validate_microfloat($T, $nonfinite_expr, $overflow_expr)
+        $mod.float_bits(::Type{$T}) = ($S, $E, $M)
         $mod.non_finite_behavior(::Type{$T}) = $nonfinite_expr
         $mod.overflow_policy(::Type{$T}) = $overflow_expr
         let lookup = Tuple($_to_bfloat16(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))

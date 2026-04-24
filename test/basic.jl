@@ -55,7 +55,7 @@ end
     @test non_finite_behavior(Float4_E2M1FN)    === FiniteOnly
 
     # Forgetting `non_finite_behavior` on a custom type errors loudly.
-    primitive type _BadFloat <: Microfloats.Microfloat{1,2,1} 8 end
+    primitive type _BadFloat <: Microfloats.Microfloat 8 end
     @test_throws ErrorException Microfloats.non_finite_behavior(_BadFloat)
 end
 
@@ -64,7 +64,7 @@ end
     @test Microfloats.overflow_policy(_E4M3FN_SAT)   === SAT
 
     # Forgetting `overflow_policy` on a custom type errors loudly.
-    primitive type _BadFloatOvf <: Microfloats.Microfloat{1,2,1} 8 end
+    primitive type _BadFloatOvf <: Microfloats.Microfloat 8 end
     @test_throws ErrorException Microfloats.overflow_policy(_BadFloatOvf)
 end
 
