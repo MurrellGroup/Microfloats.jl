@@ -59,6 +59,15 @@ end
     @test_throws ErrorException Microfloats.non_finite_behavior(_BadFloat)
 end
 
+@testset "overflow_policy trait" begin
+    @test Microfloats.overflow_policy(Float8_E4M3FN) === OVF
+    @test Microfloats.overflow_policy(_E4M3FN_SAT)   === SAT
+
+    # Forgetting `overflow_policy` on a custom type errors loudly.
+    primitive type _BadFloatOvf <: Microfloats.Microfloat{1,2,1} 8 end
+    @test_throws ErrorException Microfloats.overflow_policy(_BadFloatOvf)
+end
+
 @testset "IEEE types: Inf and NaN encodings" begin
     @testset "$T" for T in (Float8_E3M4, Float8_E5M2)
         @test isinf(inf(T))
@@ -150,6 +159,45 @@ end
     @test  issubnormal(reinterpret(Float8_E4M3, 0x07))
     @test !issubnormal(reinterpret(Float8_E4M3, 0x08))
     @test  issubnormal(-reinterpret(Float8_E4M3, 0x01))
+end
+
+@testset "exponent" begin
+    # normals: matches Base.exponent on the round-tripped value
+    @testset "$T normals" for T in (Float8_E3M4, Float8_E4M3, Float8_E5M2, Float8_E4M3FN)
+        for u in 0x01:0xff
+            x = reinterpret(T, u)
+            (isnan(x) || isinf(x) || iszero(x) || issubnormal(x)) && continue
+            @test exponent(x) == exponent(Float64(x))
+        end
+    end
+
+    # subnormals: leading-1 position determines the unbiased exponent
+    @test exponent(reinterpret(Float8_E4M3, 0x01)) == -9   # 0.001 × 2^-6
+    @test exponent(reinterpret(Float8_E4M3, 0x02)) == -8   # 0.010 × 2^-6
+    @test exponent(reinterpret(Float8_E4M3, 0x04)) == -7   # 0.100 × 2^-6
+    @test exponent(reinterpret(Float8_E5M2, 0x01)) == -16  # 0.01  × 2^-14
+    @test exponent(reinterpret(Float8_E5M2, 0x02)) == -15  # 0.10  × 2^-14
+
+    # DomainError for zero / Inf / NaN — matches Base.exponent semantics
+    @test_throws DomainError exponent(zero(Float8_E4M3))
+    @test_throws DomainError exponent(-zero(Float8_E4M3))
+    @test_throws DomainError exponent(inf(Float8_E5M2))
+    @test_throws DomainError exponent(-inf(Float8_E5M2))
+    @test_throws DomainError exponent(nan(Float8_E4M3))
+end
+
+@testset "sign_bits / exponent_bits / significand_bits / bitwidth (Base floats)" begin
+    using Microfloats: sign_bits, exponent_bits, significand_bits, bitwidth
+
+    @test (sign_bits(Float64), exponent_bits(Float64), significand_bits(Float64)) == (1, 11, 52)
+    @test (sign_bits(Float32), exponent_bits(Float32), significand_bits(Float32)) == (1,  8, 23)
+    @test (sign_bits(Float16), exponent_bits(Float16), significand_bits(Float16)) == (1,  5, 10)
+    @test (sign_bits(BFloat16), exponent_bits(BFloat16), significand_bits(BFloat16)) == (1, 8, 7)
+
+    @test bitwidth(Float64)  == 64
+    @test bitwidth(Float32)  == 32
+    @test bitwidth(Float16)  == 16
+    @test bitwidth(BFloat16) == 16
 end
 
 @testset "Cross-microfloat arithmetic is unsupported" begin
