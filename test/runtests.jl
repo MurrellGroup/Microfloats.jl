@@ -7,6 +7,8 @@ using Microfloats: non_finite_behavior, hasinf, hasnan, inf, nan,
 using Test
 using Random
 
+using BFloat16s: BFloat16
+
 # NaN-aware bit-identity for tests. Overrides `===` for Microfloat pairs so
 # round-trip tests can treat distinct NaN encodings as equivalent without
 # losing the bit-identity semantics for signed zeros.
