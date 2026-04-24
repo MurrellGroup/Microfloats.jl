@@ -19,10 +19,8 @@ include("conversion.jl")
 @public SAT, OVF
 
 include("macro.jl")
-@public @microfloat
+export @microfloat
 
-# Each `@microfloat` call builds a per-type BFloat16 lookup table,
-# so conversion.jl must be loaded before this point.
 include("variants.jl")
 export Float8_E5M2, Float8_E4M3, Float8_E3M4
 export Float8_E4M3FN, Float8_E8M0FNU

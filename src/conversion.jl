@@ -3,12 +3,21 @@ abstract type OverflowPolicy end
 """
     OVF
 
-Sentinel overflow: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes).
+Overflow conversion: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes).
 
 | Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
 | ---------------------- | --------------- | ------------- | ------------- |
 | `isnan(x)`             | NaN             | NaN           | Error         |
 | `abs(x) > floatmax(T)` | ±Inf            | NaN           | Error         |
+
+## Examples
+
+```jldoctest
+julia> @microfloat OverflowingFloat8 exponent=4 significand=3 overflow=Microfloats.OVF
+
+julia> OverflowingFloat8(10000)
+OverflowingFloat8(Inf)
+```
 """
 abstract type OVF <: OverflowPolicy end
 
@@ -20,7 +29,16 @@ Saturating conversion: out-of-range finite inputs clamp to `±floatmax(T)`.
 | Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
 | ---------------------- | --------------- | ------------- | ------------- |
 | `isnan(x)`             | NaN             | NaN           | Error         |
-| `abs(x) > floatmax(T)` | ±floatmax       | ±floatmax     | ±floatmax         |
+| `abs(x) > floatmax(T)` | ±floatmax       | ±floatmax     | ±floatmax     |
+
+## Examples
+
+```jldoctest
+julia> @microfloat SaturatingFloat8 exponent=4 significand=3 overflow=Microfloats.SAT
+
+julia> SaturatingFloat8(10000)
+SaturatingFloat8(240.0)
+```
 """
 abstract type SAT <: OverflowPolicy end
 
