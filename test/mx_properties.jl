@@ -1,7 +1,7 @@
 @testset "MX: no Infs" begin
     for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
         @testset "$T no isinf()" begin
-            for u in UInt8(0):UInt8(0xff)
+            for u in 0x00:0xff
                 @test !isinf(reinterpret(T, u))
             end
         end
@@ -13,12 +13,12 @@ end
     @testset "E4M3" begin
         T = MX_E4M3
         em = UInt8(Microfloats.exponent_mask(T))
-        mm = UInt8(Base.significand_mask(T))
+        mm = UInt8(Microfloats.significand_mask(T))
         sm = UInt8(Microfloats.sign_mask(T))
-        nm = Base.significand_bits(T)
+        nm = Microfloats.significand_bits(T)
         maxm = UInt8((UInt16(1) << nm) - 1)
-        for s in (UInt8(0), sm)
-            for mv in UInt8(0):maxm
+        for s in (0x00, sm)
+            for mv in 0x00:maxm
                 m = mv & mm
                 x = reinterpret(T, (s & sm) | em | m)
                 if m == mm
@@ -33,13 +33,13 @@ end
     # E3M2/E2M3/E2M1: exp=all-ones are finite; no NaN sentinel
     for T in (MX_E3M2, MX_E2M3, MX_E2M1)
         @testset "$T exp=all-ones finite" begin
-            em = UInt8(Base.exponent_mask(T))
+            em = UInt8(Microfloats.exponent_mask(T))
             sm = UInt8(Microfloats.sign_mask(T))
-            nm = Base.significand_bits(T)
-            mm = UInt8(Base.significand_mask(T))
+            nm = Microfloats.significand_bits(T)
+            mm = UInt8(Microfloats.significand_mask(T))
             maxm = UInt8((UInt16(1) << nm) - 1)
-            for s in (UInt8(0), sm)
-                for mv in UInt8(0):maxm
+            for s in (0x00, sm)
+                for mv in 0x00:maxm
                     m = mv & mm
                     x = reinterpret(T, (s & sm) | em | m)
                     @test isfinite(x)
@@ -61,7 +61,7 @@ end
 @testset "MX: round-trip via Float32 preserves bits (canonical encodings)" begin
     for T in (MX_E4M3, MX_E5M2, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
         @testset "$T" begin
-            used_mask = Microfloats.sign_mask(T) | Base.exponent_mask(T) | Base.significand_mask(T)
+            used_mask = Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T)
             for u in 0x00:0xff
                 (u & ~used_mask) != 0x00 && continue
                 x = reinterpret(T, u)
@@ -72,32 +72,46 @@ end
     end
 end
 
-@testset "MX: saturation and NaN/Inf mapping from Float32" begin
-    for T in (MX_E5M2, MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
-        @testset "$T" begin
-            fmax = floatmax(T)
-            # +Inf/-Inf map to ±floatmax (unsigned maps both to +floatmax)
-            @test T(Inf32, SAT) == fmax
-            if Microfloats.sign_bits(T) == 0
-                @test T(-Inf32, SAT) == fmax
-            else
-                @test T(-Inf32, SAT) == -fmax
-            end
-            # NaN maps to sentinel for E4M3/E8M0, else saturates to floatmax
-            if T <: Union{MX_E4M3, MX_E5M2, MX_E8M0}
-                @test isnan(T(NaN32))
-            else
-                @test_throws DomainError T(NaN32)
-            end
-            # Values just beyond floatmax saturate
-            big = nextfloat(Float32(fmax))
-            @test T(big, SAT) == fmax
-            if Microfloats.sign_bits(T) == 0
-                @test T(-big, SAT) == fmax
-            else
-                @test T(-big, SAT) == -fmax
-            end
-        end
+@testset "MX: default overflow mapping from Float32" begin
+    # Each MX type's default policy is baked in. We test the shipped
+    # behavior per type; alternate semantics require a twin type.
+    @testset "E5M2 (IEEE, OVF)" begin
+        T = MX_E5M2
+        @test T(+Inf32) == inf(T)
+        @test T(-Inf32) == -inf(T)
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == inf(T)
+        @test T(-big) == -inf(T)
+    end
+
+    @testset "E4M3 (NanOnlyAllOnes, OVF)" begin
+        T = MX_E4M3
+        @test isnan(T(+Inf32))
+        @test isnan(T(-Inf32))
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(+big))
+        @test isnan(T(-big))
+    end
+
+    @testset "E8M0 (NanOnlyAllOnes, OVF)" begin
+        T = MX_E8M0
+        @test isnan(T(+Inf32))
+        @test_throws DomainError T(-Inf32)
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(big))
+    end
+
+    @testset "FiniteOnly $T" for T in (MX_E3M2, MX_E2M3, MX_E2M1)
+        fmax = floatmax(T)
+        @test T(+Inf32) == +fmax
+        @test T(-Inf32) == -fmax
+        @test_throws DomainError T(NaN32)
+        big = nextfloat(BFloat16(fmax))
+        @test T(+big) == +fmax
+        @test T(-big) == -fmax
     end
 end
 
@@ -106,7 +120,7 @@ end
         @testset "$T subnormal min value" begin
             if Microfloats.significand_bits(T) > 0
                 x = reinterpret(T, 0x01)
-                expected = Float32(2.0)^(1 - Base.exponent_bias(T) - Base.significand_bits(T))
+                expected = Float32(2.0)^(1 - Microfloats.exponent_bias(T) - Microfloats.significand_bits(T))
                 @test Float32(x) == expected
             end
         end
@@ -123,8 +137,9 @@ end
             end
         end
     end
-    @testset "E8M0 zero" begin
-        @test iszero(reinterpret(MX_E8M0, 0x00))
+    @testset "E8M0 minimum (no zero)" begin
+        @test !iszero(reinterpret(MX_E8M0, 0x00))
+        @test Float32(reinterpret(MX_E8M0, 0x00)) == 2f0^-127
     end
 end
 
@@ -140,7 +155,7 @@ end
     end
     @testset "E4M3 NaN equality" begin
         T = MX_E4M3
-        x = reinterpret(T, Base.exponent_mask(T) | Base.significand_mask(T))
+        x = reinterpret(T, Microfloats.exponent_mask(T) | Microfloats.significand_mask(T))
         @test isnan(x)
         @test !(x == x)
     end
@@ -156,11 +171,11 @@ end
     for T in (MX_E4M3, MX_E5M2, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
         @testset "$T" begin
             vals = Tuple{UInt8,Float32,Any}[]
-            for u in UInt8(0):UInt8(0xff)
+            for u in 0x00:0xff
                 x = reinterpret(T, u)
                 isnan(x) && continue
                 # Only include canonical encodings: padding bits outside fields are zero
-                used_mask = UInt8(Microfloats.sign_mask(T) | Base.exponent_mask(T) | Base.significand_mask(T))
+                used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T))
                 (u & ~used_mask) != 0x00 && continue
                 push!(vals, (u, Float32(x), x))
             end

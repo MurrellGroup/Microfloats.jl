@@ -166,7 +166,8 @@
 
             @test isnan(reinterpret(MX_E8M0, 0b11111111))
 
-            @test iszero(reinterpret(MX_E8M0, 0b00000000))
+            @test !iszero(reinterpret(MX_E8M0, 0b00000000))
+            @test Float32(reinterpret(MX_E8M0, 0b00000000)) == 2f0^-127
         end
 
     end

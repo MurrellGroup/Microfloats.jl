@@ -1,70 +1,78 @@
-@testset "Overflow" begin
+@testset "Overflow: IEEE types (OVF)" begin
+    # overflow=OVF default: finite overflow → ±Inf, NaN input → NaN.
+    @testset "$T" for T in (Float8_E3M4, Float8_E5M2)
+        @test overflow_policy(T) === OVF
 
-    @testset "Has Inf+NaN" begin
-        @testset for T in (
-            Float8_E5M2, Float8_E4M3, Float8_E3M4, Float6_E3M2, Float6_E2M3, Float4_E2M1,
-            MX_E5M2,
-        )
-            @test T(NaN, SAT) |> isnan
-            @test T(NaN, OVF) |> isnan
+        @test isnan(T(NaN))
+        @test T(+Inf) == +inf(T)
+        @test T(-Inf) == -inf(T)
 
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test T(+Inf, OVF) == +Inf
-            @test T(-Inf, OVF) == -Inf
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == +inf(T)
+        @test T(-big) == -inf(T)
+    end
+end
 
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test T(+greater_than_floatmax, OVF) == +Inf
-            @test T(-greater_than_floatmax, OVF) == -Inf
-        end
+@testset "Overflow: NanOnlyAllOnes types (OVF)" begin
+    # Default for NanOnlyAllOnes: OVF. Overflow → NaN. Matches cutile-python
+    # and the OCP strict reading. PyTorch-style saturation requires a
+    # twin type declared with `overflow=SAT`.
+    @testset "Float8_E4M3FN" begin
+        T = Float8_E4M3FN
+        @test overflow_policy(T) === OVF
+
+        @test isnan(T(NaN))
+        @test isnan(T(+Inf))
+        @test isnan(T(-Inf))
+
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(+big))
+        @test isnan(T(-big))
     end
 
-    @testset "Has NaN" begin
-        @testset for T in (
-            MX_E4M3, MX_E8M0,
-        )
-            @test T(NaN, SAT) |> isnan
-            @test T(NaN, OVF) |> isnan
+    @testset "Float8_E8M0FNU" begin
+        # Unsigned NanOnlyAllOnes scale type; negative input throws regardless.
+        T = Float8_E8M0FNU
+        @test overflow_policy(T) === OVF
 
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test T(+Inf, OVF) |> isnan
-            @test T(-Inf, OVF) |> isnan
+        @test isnan(T(NaN))
+        @test isnan(T(+Inf))
+        @test_throws DomainError T(-Inf)
 
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test T(+greater_than_floatmax, OVF) |> isnan
-            @test T(-greater_than_floatmax, OVF) |> isnan
-        end
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(big))
+    end
+end
+
+@testset "Overflow: FiniteOnly types (SAT)" begin
+    # overflow=SAT forced — no sentinel encoding exists. NaN input throws.
+    @testset "$T" for T in (Float4_E2M1FN, Float6_E2M3FN, Float6_E3M2FN)
+        @test overflow_policy(T) === SAT
+
+        @test_throws DomainError T(NaN)
+
+        @test T(+Inf) == +floatmax(T)
+        @test T(-Inf) == -floatmax(T)
+
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == +floatmax(T)
+        @test T(-big) == -floatmax(T)
     end
 
-    @testset "Finite" begin
-        @testset for T in (
-            MX_E3M2, MX_E2M3, MX_E2M1,
-        )
+    # Specific: Float4_E2M1FN (NVFP4 value type) saturates at ±6
+    @test Float32(Float4_E2M1FN(6.0)) == 6.0
+    @test Float32(Float4_E2M1FN(7.0)) == 6.0
+end
 
-            @test_throws DomainError T(NaN, SAT)
-            @test_throws DomainError T(NaN, OVF)
-
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test_throws DomainError T(+Inf, OVF)
-            @test_throws DomainError T(-Inf, OVF)
-
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test_throws DomainError T(+greater_than_floatmax, OVF)
-            @test_throws DomainError T(-greater_than_floatmax, OVF)
-        end
-
-        @test MX_E2M1(6, SAT) == 6
-        @test MX_E2M1(6, OVF) == 6
-        @test MX_E2M1(7, SAT) == 6
-        @test_throws DomainError MX_E2M1(7, OVF)
-    end
-
+@testset "Alternate policy via twin type + reinterpret" begin
+    # _E4M3FN_SAT is declared at top of runtests.jl: same bit layout as
+    # Float8_E4M3FN but with overflow=SAT (PyTorch/Triton convention).
+    # Shows the documented escape hatch for the non-default policy.
+    @test overflow_policy(_E4M3FN_SAT) === SAT
+    big = nextfloat(BFloat16(floatmax(_E4M3FN_SAT)))
+    @test _E4M3FN_SAT(big) == floatmax(_E4M3FN_SAT)            # SAT: overflow → floatmax
+    @test isnan(Float8_E4M3FN(big))                            # OVF: overflow → NaN
+    # Bit layout is identical, so reinterpret is a free relabel.
+    x = Float8_E4M3FN(1.0)
+    @test reinterpret(UInt8, reinterpret(_E4M3FN_SAT, x)) == reinterpret(UInt8, x)
 end

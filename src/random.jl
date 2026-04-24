@@ -6,8 +6,9 @@ function Base.rand(rng::Random.AbstractRNG, ::Random.SamplerTrivial{Random.Close
 end
 
 # Standard normal sampling for signed Microfloats
-function Base.randn(rng::Random.AbstractRNG, ::Type{T}) where {S,E,M,V,T<:Microfloat{S,E,M,V}}
-    S == 0 && throw(ArgumentError("randn is undefined for unsigned microfloats (no sign bit)"))
+Base.randn(::Random.AbstractRNG, ::Type{T}) where T<:Microfloat =
+    throw(ArgumentError("randn is undefined for unsigned microfloats (must have 1 sign bit)"))
+function Base.randn(rng::Random.AbstractRNG, ::Type{T}) where T<:Microfloat{1}
     z = randn(rng, Float32)
     b = Float32(floatmax(T))
     return T(clamp(z, -b, b))
