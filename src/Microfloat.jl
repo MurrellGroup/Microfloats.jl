@@ -55,7 +55,18 @@ Return `IEEE`, `NanOnlyAllOnes`, or `FiniteOnly` based on the assigned trait.
 non_finite_behavior(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.non_finite_behavior(::Type{$T})`")
 
+"""
+    hasinf(::Type{<:Microfloat}) -> Bool
+
+Return `true` if the type can represent Inf, otherwise `false`.
+"""
 hasinf(::Type{T}) where T<:Microfloat = hasinf(non_finite_behavior(T))
+
+"""
+    hasnan(::Type{<:Microfloat}) -> Bool
+
+Return `true` if the type can represent NaN, otherwise `false`.
+"""
 hasnan(::Type{T}) where T<:Microfloat = hasnan(non_finite_behavior(T))
 
 # ───────────────────────── Inf / NaN / floatmax / inf / nan ──────────────────────────
@@ -64,7 +75,6 @@ Base.isinf(x::T) where T<:Microfloat = _isinf(non_finite_behavior(T), x)
 Base.isnan(x::T) where T<:Microfloat = _isnan(non_finite_behavior(T), x)
 
 inf(::Type{T}) where T<:Microfloat = _inf(non_finite_behavior(T), T)
-
 nan(::Type{T}) where T<:Microfloat = _nan(non_finite_behavior(T), T)
 
 Base.floatmax(::Type{T}) where T<:Microfloat = _floatmax(non_finite_behavior(T), T)
