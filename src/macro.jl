@@ -44,7 +44,7 @@ macro microfloat(name, kwargs...)
         elseif k == :overflow
             overflow = v
         else
-            error("@microfloat: unknown keyword `$k`")
+            throw(ArgumentError("@microfloat: unknown keyword `$k`"))
         end
     end
 

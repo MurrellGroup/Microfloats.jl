@@ -200,7 +200,10 @@ function _to_bfloat16(x::T) where {T<:Microfloat}
     end
 end
 
-to_bfloat16(x::T) where T<:Microfloat = _to_bfloat16(x)
+# `@microfloat` adds a new method to `to_bfloat16`
+function to_bfloat16 end
+
+# user can add specialized conversions to `BFloat16` itself
 BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
 
 (::Type{T})(x::Microfloat) where {T<:AbstractFloat} = T(BFloat16(x))

@@ -1,4 +1,4 @@
-@republic import Base: signbit, exponent
+import Base: signbit, exponent
 
 """
     Microfloat{S,E,M} <: AbstractFloat
@@ -18,7 +18,15 @@ significand_mask(::Type{T}) where T<:Microfloat = UInt8(0x01 << significand_bits
 Base.reinterpret(::Type{Unsigned}, x::Microfloat) = reinterpret(UInt8, x)
 
 signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && !iszero(reinterpret(Unsigned, x) & sign_mask(typeof(x)))
-exponent(x::Microfloat) = Int((reinterpret(Unsigned, x) & exponent_mask(typeof(x))) >> significand_bits(typeof(x)))
+function exponent(x::T) where T<:Microfloat
+    (isnan(x) || isinf(x)) && throw(DomainError(x, "Cannot be NaN or Inf."))
+    iszero(x) && throw(DomainError(x, "Cannot be ±0.0."))
+    raw = reinterpret(Unsigned, x)
+    biased = Int((raw & exponent_mask(T)) >> significand_bits(T))
+    biased == 0 || return biased - exponent_bias(T)
+    sig = raw & significand_mask(T)
+    return 8 - leading_zeros(sig) - exponent_bias(T) - significand_bits(T)
+end
 
 function Base.show(io::IO, x::T) where T<:Microfloat
     show_typeinfo = get(IOContext(io), :typeinfo, nothing) != T

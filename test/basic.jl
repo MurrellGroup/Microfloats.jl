@@ -4,6 +4,7 @@
         @test precision(T) == Microfloats.significand_bits(T) + 1
         @test floatmax(T) > zero(T)
         @test isfinite(floatmax(T))
+        @test Microfloats.overflow_policy(T) <: Union{Microfloats.OVF, Microfloats.SAT}
 
         @test signbit(zero(T)) == false
 
@@ -34,6 +35,13 @@
             @test T(Float32(x)) ≡ x
         end
     end
+
+    @test widen(Float8_E4M3) == BFloat16
+    @test string(Float8_E4M3(1.0)) == "Float8_E4M3(1.0)"
+end
+
+@testset "@microfloat" begin
+    @test_throws "abc" @eval @microfloat Name abc=1
 end
 
 @testset "NonFiniteBehavior trait" begin
@@ -124,6 +132,24 @@ end
         @test all(isfinite, xs)
         @test any(x -> x != zero(T), xs)
     end
+end
+
+@testset "eps / round / issubnormal" begin
+    @test eps(Float8_E4M3(1.0)) == Float8_E4M3(0.125)
+    @test eps(Float8_E4M3(2.0)) == Float8_E4M3(0.25)
+    @test eps(Float8_E4M3(0.5)) == Float8_E4M3(0.0625)
+
+    @test round(Float8_E4M3(1.5), RoundDown)    === Float8_E4M3(1.0)
+    @test round(Float8_E4M3(1.5), RoundUp)      === Float8_E4M3(2.0)
+    @test round(Float8_E4M3(2.5), RoundNearest) === Float8_E4M3(2.0)
+    @test round(Float8_E4M3(0.5), RoundNearest) === Float8_E4M3(0.0)
+
+    @test !issubnormal(zero(Float8_E4M3))
+    @test !issubnormal(one(Float8_E4M3))
+    @test  issubnormal(reinterpret(Float8_E4M3, 0x01))
+    @test  issubnormal(reinterpret(Float8_E4M3, 0x07))
+    @test !issubnormal(reinterpret(Float8_E4M3, 0x08))
+    @test  issubnormal(-reinterpret(Float8_E4M3, 0x01))
 end
 
 @testset "Cross-microfloat arithmetic is unsupported" begin
