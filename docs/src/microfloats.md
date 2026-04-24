@@ -15,8 +15,6 @@ Finite
 These types have IEEE 754-like Inf/NaN encodings, with Inf being represented as all 1s in the exponent and a significand of zero, and NaN being represented as all 1s in the exponent and a non-zero significand.
 
 ```@docs
-IEEE_754_like
-Float8_E3M4
 Float8_E4M3
 Float8_E5M2
 Float6_E2M3

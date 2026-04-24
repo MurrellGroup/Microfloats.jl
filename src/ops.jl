@@ -7,8 +7,10 @@ end
 
 import Base: (+), (-), (*), (/), (\), (^)
 
+# Same-type binary ops. Cross-microfloat ops are intentionally unsupported —
+# callers must explicitly cast to a wider type first
 for op in (:+, :-, :*, :/, :\, :^)
-    @eval ($op)(a::Microfloat, b::Microfloat) = promote_type(typeof(a), typeof(b))(($op)(Float32(a), Float32(b)))
+    @eval ($op)(a::T, b::T) where T<:Microfloat = T(($op)(Float32(a), Float32(b)))
 end
 
 (^)(a::T, b::Integer) where T<:Microfloat = T(Float32(a)^b)

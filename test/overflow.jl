@@ -1,70 +1,70 @@
-@testset "Overflow" begin
+@testset "Overflow: IEEE types" begin
+    # Default: OVF → Inf for finite overflow, NaN input → NaN
+    @testset "$T" for T in (Float8_E3M4, Float8_E5M2)
+        @test default_overflow_policy(T) === OVF
 
-    @testset "Has Inf+NaN" begin
-        @testset for T in (
-            Float8_E5M2, Float8_E4M3, Float8_E3M4, Float6_E3M2, Float6_E2M3, Float4_E2M1,
-            MX_E5M2,
-        )
-            @test T(NaN, SAT) |> isnan
-            @test T(NaN, OVF) |> isnan
+        @test isnan(T(NaN))
+        @test T(+Inf) == +inf(T)
+        @test T(-Inf) == -inf(T)
 
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test T(+Inf, OVF) == +Inf
-            @test T(-Inf, OVF) == -Inf
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == +inf(T)       # default OVF
+        @test T(-big) == -inf(T)
+        @test T(+big, SAT) == +floatmax(T)
+        @test T(-big, SAT) == -floatmax(T)
+    end
+end
 
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test T(+greater_than_floatmax, OVF) == +Inf
-            @test T(-greater_than_floatmax, OVF) == -Inf
-        end
+@testset "Overflow: NanOnlyAllOnes types" begin
+    # Default: SAT → floatmax for finite overflow (matches PyTorch/Triton/Quartet)
+    @testset "$T" for T in (Float8_E4M3FN,)
+        @test default_overflow_policy(T) === SAT
+
+        @test isnan(T(NaN))
+        @test T(+Inf) == +floatmax(T)
+        @test T(-Inf) == -floatmax(T)
+
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == +floatmax(T)             # default SAT
+        @test T(-big) == -floatmax(T)
+        @test isnan(T(+big, OVF))
+        @test isnan(T(-big, OVF))
     end
 
-    @testset "Has NaN" begin
-        @testset for T in (
-            MX_E4M3, MX_E8M0,
-        )
-            @test T(NaN, SAT) |> isnan
-            @test T(NaN, OVF) |> isnan
+    # Unsigned NanOnlyAllOnes (E8M0FNU): negative input throws, large positive saturates
+    T = Float8_E8M0FNU
+    @test default_overflow_policy(T) === SAT
+    @test T(+Inf) == floatmax(T)
+    @test_throws DomainError T(-Inf)
+    big = nextfloat(BFloat16(floatmax(T)))
+    @test T(big) == floatmax(T)
+    @test isnan(T(big, OVF))
+    @test isnan(T(NaN))
+end
 
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test T(+Inf, OVF) |> isnan
-            @test T(-Inf, OVF) |> isnan
+@testset "Overflow: FiniteOnly types" begin
+    # Default: SAT. NaN input always throws (no sentinel). OVF also throws on overflow.
+    @testset "$T" for T in (Float4_E2M1FN, Float6_E2M3FN, Float6_E3M2FN)
+        @test default_overflow_policy(T) === SAT
 
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test T(+greater_than_floatmax, OVF) |> isnan
-            @test T(-greater_than_floatmax, OVF) |> isnan
-        end
+        @test_throws DomainError T(NaN)
+        @test_throws DomainError T(NaN, OVF)
+        @test_throws DomainError T(NaN, SAT)
+
+        @test T(+Inf) == +floatmax(T)
+        @test T(-Inf) == -floatmax(T)
+        @test_throws DomainError T(+Inf, OVF)
+        @test_throws DomainError T(-Inf, OVF)
+
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == +floatmax(T)
+        @test T(-big) == -floatmax(T)
+        @test_throws DomainError T(+big, OVF)
+        @test_throws DomainError T(-big, OVF)
     end
 
-    @testset "Finite" begin
-        @testset for T in (
-            MX_E3M2, MX_E2M3, MX_E2M1,
-        )
-
-            @test_throws DomainError T(NaN, SAT)
-            @test_throws DomainError T(NaN, OVF)
-
-            @test T(+Inf, SAT) == +floatmax(T)
-            @test T(-Inf, SAT) == -floatmax(T)
-            @test_throws DomainError T(+Inf, OVF)
-            @test_throws DomainError T(-Inf, OVF)
-
-            greater_than_floatmax = nextfloat(BFloat16(floatmax(T)))
-            @test T(+greater_than_floatmax, SAT) == +floatmax(T)
-            @test T(-greater_than_floatmax, SAT) == -floatmax(T)
-            @test_throws DomainError T(+greater_than_floatmax, OVF)
-            @test_throws DomainError T(-greater_than_floatmax, OVF)
-        end
-
-        @test MX_E2M1(6, SAT) == 6
-        @test MX_E2M1(6, OVF) == 6
-        @test MX_E2M1(7, SAT) == 6
-        @test_throws DomainError MX_E2M1(7, OVF)
-    end
-
+    # Specific: Float4_E2M1FN (NVFP4 value type) saturates at ±6
+    @test Float32(Float4_E2M1FN(6.0)) == 6.0
+    @test Float32(Float4_E2M1FN(7.0)) == 6.0   # SAT
+    @test_throws DomainError Float4_E2M1FN(7.0, OVF)
 end

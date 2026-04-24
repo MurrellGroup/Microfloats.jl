@@ -1,5 +1,21 @@
+"""
+    OverflowPolicy
+
+Policy controlling how out-of-range finite input is mapped to a [`Microfloat`](@ref).
+
+- [`SAT`](@ref): saturate to `±floatmax(T)`.
+- [`OVF`](@ref): overflow to the type's sentinel (`±Inf` for `IEEE`,
+  `NaN` for `NanOnlyAllOnes`; throws for `FiniteOnly` — no sentinel exists).
+
+Defaults are resolved by [`default_overflow_policy`](@ref) from the type's
+[`non_finite_behavior`](@ref): `IEEE` → `OVF`, otherwise `SAT`.
+"""
 abstract type OverflowPolicy end
+
+"""Saturating conversion: out-of-range finite inputs clamp to `±floatmax(T)`."""
 abstract type SAT <: OverflowPolicy end
+
+"""Sentinel overflow: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes)."""
 abstract type OVF <: OverflowPolicy end
 
 function rshift_round_to_even(x::UInt16, n::Int)
@@ -11,14 +27,15 @@ function rshift_round_to_even(x::UInt16, n::Int)
     UInt16((x_32 >> n) + (up ? 1 : 0))
 end
 
-is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat = reinterpret(Unsigned, abs(xb)) > reinterpret(Unsigned, BFloat16(floatmax(T)))
+is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat =
+    reinterpret(Unsigned, abs(xb)) > reinterpret(Unsigned, BFloat16(floatmax(T)))
 clamp_floatmax(x::T) where T<:Microfloat = signbit(x) ? -floatmax(T) : floatmax(T)
 clamp_inf(x::T) where T<:Microfloat = signbit(x) ? -inf(T) : inf(T)
 
 function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:OverflowPolicy}
     if P <: SAT
         if isnan(xb)
-            return nan(T)
+            return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
         elseif isinf(xb) || is_outside_floatmax(xb, T)
             return clamp_floatmax(x)
         else
@@ -26,18 +43,33 @@ function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:Overflo
         end
     elseif P <: OVF
         if isnan(xb)
-            return nan(T)
+            return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
         elseif isinf(xb) || is_outside_floatmax(xb, T)
-            return hasinf(T) ? clamp_inf(x) : nan(T)
+            return hasinf(T) ? clamp_inf(x) :
+                   hasnan(T) ? nan(T) :
+                   throw(DomainError(xb, "$T has no overflow sentinel; use SAT"))
         else
             return x
         end
+    else
+        throw(ArgumentError("Unknown overflow policy $P"))
     end
 end
 
-default_overflow_policy(::Type{T}) where T = hasnan(T) ? OVF : SAT
+"""
+    default_overflow_policy(T) -> Type{<:OverflowPolicy}
+
+Default overflow policy for `Microfloat` type `T`. Keys on `hasinf(T)`:
+IEEE types default to `OVF` (finite overflow → Inf), all others default
+to `SAT` (clamp to `floatmax`). Matches PyTorch/Triton/Quartet-II practice
+for FP8/FP4.
+"""
+default_overflow_policy(::Type{T}) where T<:Microfloat = hasinf(T) ? OVF : SAT
 
 function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T<:Microfloat,P<:OverflowPolicy}
+    if sign_bits(T) == 0 && signbit(x)
+        throw(DomainError(x, "negative input to unsigned $T"))
+    end
     iszero(x) && return zero(T)
 
     bf16_exp  = Int((reinterpret(Unsigned, x) >> 7) & 0x00ff)
@@ -65,18 +97,22 @@ function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T
         # Normal path in target format
         shift = 7 - significand_bits(T)
         total = shift >= 0 ? rshift_round_to_even(sig8, shift) : (sig8 << (-shift))
-        t_exp_rounded = t_exp + (total >> (significand_bits(T) + 1))
-        max_exp = (1 << exponent_bits(T)) - 1
-        if t_exp_rounded > max_exp
-            if !hasinf(T)
-                t_exp_rounded = max_exp
-                total = (UInt16(1) << significand_bits(T)) | UInt16((1 << significand_bits(T)) - 1)
-            else
-                t_exp_rounded = max_exp
+        if total == 0
+            t_raw = 0x00
+        else
+            t_exp_rounded = t_exp + (total >> (significand_bits(T) + 1))
+            max_exp = (1 << exponent_bits(T)) - 1
+            if t_exp_rounded > max_exp
+                if !hasinf(T)
+                    t_exp_rounded = max_exp
+                    total = (UInt16(1) << significand_bits(T)) | UInt16((1 << significand_bits(T)) - 1)
+                else
+                    t_exp_rounded = max_exp
+                end
             end
+            frac_field = UInt8(total) & UInt8((1 << significand_bits(T)) - 1)
+            t_raw = (UInt8(t_exp_rounded) << significand_bits(T)) | frac_field
         end
-        frac_field = UInt8(total) & UInt8((1 << significand_bits(T)) - 1)
-        t_raw = (UInt8(t_exp_rounded) << significand_bits(T)) | frac_field
     end
 
     t_raw |= (reinterpret(Unsigned, x) >> 15 % UInt8) << (exponent_bits(T) + significand_bits(T)) & sign_mask(T)
@@ -87,7 +123,7 @@ end
 (::Type{T})(x::Number, args...) where {T<:Microfloat} = T(BFloat16(x), args...)
 (::Type{T})(::Type{P}) where {T<:Microfloat,P<:OverflowPolicy} = x -> T(x, P)
 
-function to_bfloat16(x::T) where {T<:Microfloat}
+function _to_bfloat16(x::T) where {T<:Microfloat}
     t_raw = reinterpret(UInt8, x)
 
     t_sign = (sign_bits(T) == 1) && (t_raw & (UInt8(1) << (exponent_bits(T) + significand_bits(T))) != 0)
@@ -96,7 +132,6 @@ function to_bfloat16(x::T) where {T<:Microfloat}
 
     bf16_sign_bit = UInt16(t_sign ? 1 : 0) << 15
 
-    # Check for special values first, using trait-aware detection
     if isinf(x)
         return reinterpret(BFloat16, bf16_sign_bit | 0x7f80)
     elseif isnan(x)
@@ -108,7 +143,7 @@ function to_bfloat16(x::T) where {T<:Microfloat}
     M = significand_bits(T)
     bias = exponent_bias(T)
 
-    if t_exponent_field == 0 # Subnormal
+    if t_exponent_field == 0 && M > 0 # Subnormal
         nlz = M - 1 - floor(Int, log2(t_fraction_field))
         t_significand_total = UInt16(t_fraction_field) << (nlz + 1)
         t_true_exponent = -nlz - bias
@@ -117,7 +152,6 @@ function to_bfloat16(x::T) where {T<:Microfloat}
         t_true_exponent = t_exponent_field - bias
     end
 
-    # Common path for conversion to BFloat16
     bf16_exponent_field = t_true_exponent + 127
     bf16_significand_total = if M >= 7
         rshift_round_to_even(t_significand_total, M - 7)
@@ -146,9 +180,7 @@ function to_bfloat16(x::T) where {T<:Microfloat}
     end
 end
 
-@generated function BFloat16(x::T) where T<:Microfloat
-    lookup = Tuple(to_bfloat16(reinterpret(T, i % UInt8)) for i in 0:2^total_bits(T)-1)
-    :($lookup[reinterpret(UInt8, x) + 0x0001])
-end
+to_bfloat16(x::T) where T<:Microfloat = _to_bfloat16(x)
+BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
 
 (::Type{T})(x::Microfloat) where {T<:AbstractFloat} = T(BFloat16(x))
