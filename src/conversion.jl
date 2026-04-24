@@ -70,7 +70,7 @@ function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T
     if sign_bits(T) == 0 && signbit(x)
         throw(DomainError(x, "negative input to unsigned $T"))
     end
-    iszero(x) && return zero(T)
+    iszero(x) && return signbit(x) ? -zero(T) : zero(T)
 
     bf16_exp  = Int((reinterpret(Unsigned, x) >> 7) & 0x00ff)
     bf16_frac = UInt16(reinterpret(Unsigned, x) & 0x007f)

@@ -85,6 +85,19 @@ end
     end
 end
 
+@testset "Signed zero preservation" begin
+    for T in SIGNED_TYPES
+        @testset "$T" begin
+            nz = T(-0.0)
+            @test iszero(nz)
+            @test signbit(nz)
+            @test Float32(nz) === -0.0f0
+            @test nz == zero(T)
+            @test signbit(nz) != signbit(zero(T))
+        end
+    end
+end
+
 @testset "Unsigned microfloats" begin
     @test_throws DomainError Float8_E8M0FNU(-1.0)
     @test_throws DomainError Float8_E8M0FNU(-0.0)
