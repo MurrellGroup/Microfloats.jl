@@ -72,33 +72,46 @@ end
     end
 end
 
-@testset "MX: saturation and NaN/Inf mapping from Float32" begin
-    for T in (MX_E5M2, MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
-        @testset "$T" begin
-            fmax = floatmax(T)
-            # +Inf maps to +floatmax under SAT.
-            @test T(Inf32, SAT) == fmax
-            # Negative input: signed types saturate to -fmax; unsigned throws.
-            if Microfloats.sign_bits(T) == 0
-                @test_throws DomainError T(-Inf32, SAT)
-            else
-                @test T(-Inf32, SAT) == -fmax
-            end
-            # NaN input: types with NaN encoding return NaN; FiniteOnly throws.
-            if hasnan(T)
-                @test isnan(T(NaN32))
-            else
-                @test_throws DomainError T(NaN32)
-            end
-            # Values just beyond floatmax saturate (positive side).
-            big = nextfloat(Float32(fmax))
-            @test T(big, SAT) == fmax
-            if Microfloats.sign_bits(T) == 0
-                @test_throws DomainError T(-big, SAT)
-            else
-                @test T(-big, SAT) == -fmax
-            end
-        end
+@testset "MX: default overflow mapping from Float32" begin
+    # Each MX type's default policy is baked in. We test the shipped
+    # behavior per type; alternate semantics require a twin type.
+    @testset "E5M2 (IEEE, OVF)" begin
+        T = MX_E5M2
+        @test T(+Inf32) == inf(T)
+        @test T(-Inf32) == -inf(T)
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test T(+big) == inf(T)
+        @test T(-big) == -inf(T)
+    end
+
+    @testset "E4M3 (NanOnlyAllOnes, OVF)" begin
+        T = MX_E4M3
+        @test isnan(T(+Inf32))
+        @test isnan(T(-Inf32))
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(+big))
+        @test isnan(T(-big))
+    end
+
+    @testset "E8M0 (NanOnlyAllOnes, OVF)" begin
+        T = MX_E8M0
+        @test isnan(T(+Inf32))
+        @test_throws DomainError T(-Inf32)
+        @test isnan(T(NaN32))
+        big = nextfloat(BFloat16(floatmax(T)))
+        @test isnan(T(big))
+    end
+
+    @testset "FiniteOnly $T" for T in (MX_E3M2, MX_E2M3, MX_E2M1)
+        fmax = floatmax(T)
+        @test T(+Inf32) == +fmax
+        @test T(-Inf32) == -fmax
+        @test_throws DomainError T(NaN32)
+        big = nextfloat(BFloat16(fmax))
+        @test T(+big) == +fmax
+        @test T(-big) == -fmax
     end
 end
 

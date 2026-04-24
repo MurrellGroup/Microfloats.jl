@@ -3,13 +3,9 @@
 """
     Microfloat{S,E,M} <: AbstractFloat
 
-Abstract type for within-byte floating-point numbers with `S` sign bits
-(0 or 1), `E` exponent bits (≥ 1), and `M` significand bits (≥ 0),
-with `S + E + M ≤ 8`.
+Abstract type for floating-point numbers that fit within a single byte.
 
-Concrete subtypes are 8-bit `primitive type`s that must also register
-a [`non_finite_behavior`](@ref). See [`@microfloat`](@ref) for the
-macro-based convenience declaration.
+See [`@microfloat`](@ref) for type declaration.
 """
 abstract type Microfloat{S,E,M} <: AbstractFloat end
 
@@ -32,25 +28,9 @@ function Base.show(io::IO, x::T) where T<:Microfloat
     return nothing
 end
 
-"""
-    NonFiniteBehavior
-
-Trait hierarchy describing how a [`Microfloat`](@ref) type encodes non-finite
-values. Each concrete `Microfloat` subtype registers its behavior by defining
-a [`non_finite_behavior`](@ref) method.
-
-Three behaviors:
-
-- [`IEEE`](@ref): exponent all-ones with zero significand ⇒ Inf;
-  all-ones exponent with nonzero significand ⇒ NaN.
-- [`NanOnlyAllOnes`](@ref): no Inf. The single NaN encoding has all
-  exponent and significand bits set.
-- [`FiniteOnly`](@ref): no Inf and no NaN — every bit pattern is finite.
-  Matches MX sub-byte types and `F4E2M1FN`.
-"""
 abstract type NonFiniteBehavior end
 
-"""IEEE-754-style encoding of Inf and NaN. Requires `M ≥ 1`."""
+"""IEEE-754-style encoding of Inf and NaN."""
 abstract type IEEE           <: NonFiniteBehavior end
 
 """NaN encoded as all-ones in exponent+significand; no Inf."""
@@ -68,10 +48,9 @@ hasnan(::Type{NanOnlyAllOnes}) = true
 hasnan(::Type{FiniteOnly})     = false
 
 """
-    non_finite_behavior(T) -> Type{<:NonFiniteBehavior}
+    non_finite_behavior(::Type{<:Microfloat}) -> Type{<:NonFiniteBehavior}
 
-Required trait method on every concrete [`Microfloat`](@ref) subtype.
-Returns one of `IEEE`, `NanOnlyAllOnes`, or `FiniteOnly`.
+Return `IEEE`, `NanOnlyAllOnes`, or `FiniteOnly` based on the assigned trait.
 """
 non_finite_behavior(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.non_finite_behavior(::Type{$T})`")
@@ -84,10 +63,8 @@ hasnan(::Type{T}) where T<:Microfloat = hasnan(non_finite_behavior(T))
 Base.isinf(x::T) where T<:Microfloat = _isinf(non_finite_behavior(T), x)
 Base.isnan(x::T) where T<:Microfloat = _isnan(non_finite_behavior(T), x)
 
-"""Bit pattern for +Inf. Throws if the type has no Inf."""
 inf(::Type{T}) where T<:Microfloat = _inf(non_finite_behavior(T), T)
 
-"""Bit pattern for NaN. Throws if the type has no NaN."""
 nan(::Type{T}) where T<:Microfloat = _nan(non_finite_behavior(T), T)
 
 Base.floatmax(::Type{T}) where T<:Microfloat = _floatmax(non_finite_behavior(T), T)

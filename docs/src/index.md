@@ -7,7 +7,7 @@ CurrentModule = Microfloats
 ## Contents
 
 ```@contents
-Pages = ["index.md", "microfloats.md", "conversion.md"]
+Pages = ["index.md", "microfloat.md", "predefined.md"]
 ```
 
 ## Index

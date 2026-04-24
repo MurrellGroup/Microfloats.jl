@@ -5,6 +5,8 @@ import DLFP8Types
     # non-finite semantics as ours. Every bit pattern must agree on the
     # Float32 value (NaN encodings and signed zeros are allowed to differ
     # between the two packages — the semantic float value is what matters).
+    # DLFP8Types uses strict OCP semantics (overflow → NaN for E4M3FN,
+    # overflow → Inf for E5M2), which matches our OVF defaults directly.
     @testset "$(M_T)" for (M_T, D_T) in (
         (Microfloats.Float8_E4M3FN, DLFP8Types.Float8_E4M3FN),
         (Microfloats.Float8_E5M2,   DLFP8Types.Float8_E5M2),
@@ -17,12 +19,9 @@ import DLFP8Types
             @test isnan(mx) == isnan(dx)
             @test iszero(mx) == iszero(dx)
         end
-        # Float32 → narrow goes to the same semantic value.
-        # DLFP8Types uses strict spec semantics (overflow → NaN for E4M3FN,
-        # overflow → Inf for E5M2), which is our `OVF` policy.
         for f in Float32[0.0, -0.0, 1.0, -1.0, 3.5, -3.5, 448.0, 1000.0,
                          1.5f-5, 2.0f-7, NaN32, Inf32, -Inf32]
-            @test Float32(M_T(f, OVF)) ≡ Float32(D_T(f))
+            @test Float32(M_T(f)) ≡ Float32(D_T(f))
         end
     end
 end

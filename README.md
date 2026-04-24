@@ -1,4 +1,4 @@
-# <img src="docs/src/assets/icon.svg" width="200" align="right"> Microfloats
+# Microfloats
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://MurrellGroup.github.io/Microfloats.jl/stable/)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://MurrellGroup.github.io/Microfloats.jl/dev/)
@@ -28,10 +28,30 @@ Microfloats.non_finite_behavior(::Type{MyE5M2}) = IEEE
 
 ## Overflow policy
 
-`SAT` saturates out-of-range values to `±floatmax(T)`. `OVF` uses the type's
-sentinel (`±Inf` for IEEE, `NaN` for NanOnlyAllOnes; throws for FiniteOnly).
+Each `Microfloat` type carries its overflow policy as a compile-time trait,
+baked in at declaration via `@microfloat`. There is no runtime override —
+to convert with different semantics, declare a second type with the same
+bit layout and the alternate policy, and `reinterpret` between them.
 
-For INT8, see `FixedPointNumbers.Q1f6`.
+- `SAT` saturates out-of-range finite values to `±floatmax(T)`.
+- `OVF` maps them to the type's sentinel: `±Inf` for `IEEE`, `NaN` for
+  `NanOnlyAllOnes` (unavailable for `FiniteOnly`).
+
+Default rule: `OVF` if the type has any non-finite sentinel, else `SAT`
+(forced for `FiniteOnly`). This matches cutile-python / OCP strict
+semantics. The shipped policies:
+
+| Type                                              | NonFiniteBehavior | Overflow |
+| ------------------------------------------------- | ----------------- | -------- |
+| `Float8_E5M2`, `Float8_E4M3`, `Float8_E3M4`       | `IEEE`            | `OVF`    |
+| `Float8_E4M3FN`, `Float8_E8M0FNU`                 | `NanOnlyAllOnes`  | `OVF`    |
+| `Float6_E2M3FN`, `Float6_E3M2FN`, `Float4_E2M1FN` | `FiniteOnly`      | `SAT`    |
+
+For PyTorch/Triton-style saturating E4M3FN, declare a twin:
+
+```julia
+@microfloat Float8_E4M3FN_SAT exponent=4 significand=3 nonfinite=NanOnlyAllOnes overflow=SAT
+```
 
 ## Installation
 

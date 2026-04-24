@@ -1,22 +1,37 @@
-"""
-    OverflowPolicy
-
-Policy controlling how out-of-range finite input is mapped to a [`Microfloat`](@ref).
-
-- [`SAT`](@ref): saturate to `±floatmax(T)`.
-- [`OVF`](@ref): overflow to the type's sentinel (`±Inf` for `IEEE`,
-  `NaN` for `NanOnlyAllOnes`; throws for `FiniteOnly` — no sentinel exists).
-
-Defaults are resolved by [`default_overflow_policy`](@ref) from the type's
-[`non_finite_behavior`](@ref): `IEEE` → `OVF`, otherwise `SAT`.
-"""
 abstract type OverflowPolicy end
 
-"""Saturating conversion: out-of-range finite inputs clamp to `±floatmax(T)`."""
+"""
+    OVF
+
+Sentinel overflow: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes).
+
+| Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
+| ---------------------- | --------------- | ------------- | ------------- |
+| `isnan(x)`             | NaN             | NaN           | Error         |
+| `abs(x) > floatmax(T)` | ±Inf            | NaN           | Error         |
+"""
+abstract type OVF <: OverflowPolicy end
+
+"""
+    SAT
+
+Saturating conversion: out-of-range finite inputs clamp to `±floatmax(T)`.
+
+| Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
+| ---------------------- | --------------- | ------------- | ------------- |
+| `isnan(x)`             | NaN             | NaN           | Error         |
+| `abs(x) > floatmax(T)` | ±floatmax       | ±floatmax     | ±floatmax         |
+"""
 abstract type SAT <: OverflowPolicy end
 
-"""Sentinel overflow: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes)."""
-abstract type OVF <: OverflowPolicy end
+"""
+    overflow_policy(T) -> Type{<:OverflowPolicy}
+
+Required trait method on every concrete [`Microfloat`](@ref) subtype.
+Returns [`OVF`](@ref) or [`SAT`](@ref). Registered by [`@microfloat`](@ref).
+"""
+overflow_policy(::Type{T}) where T<:Microfloat =
+    error("$T must define `Microfloats.overflow_policy(::Type{$T})`")
 
 function rshift_round_to_even(x::UInt16, n::Int)
     n <= 0 && return x >> n
@@ -32,41 +47,29 @@ is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat =
 clamp_floatmax(x::T) where T<:Microfloat = signbit(x) ? -floatmax(T) : floatmax(T)
 clamp_inf(x::T) where T<:Microfloat = signbit(x) ? -inf(T) : inf(T)
 
-function epilogue(x::T, xb::BFloat16, ::Type{P}) where {T<:Microfloat,P<:OverflowPolicy}
-    if P <: SAT
-        if isnan(xb)
-            return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
-        elseif isinf(xb) || is_outside_floatmax(xb, T)
-            return clamp_floatmax(x)
-        else
-            return x
-        end
-    elseif P <: OVF
-        if isnan(xb)
-            return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
-        elseif isinf(xb) || is_outside_floatmax(xb, T)
-            return hasinf(T) ? clamp_inf(x) :
-                   hasnan(T) ? nan(T) :
-                   throw(DomainError(xb, "$T has no overflow sentinel; use SAT"))
-        else
-            return x
-        end
+function _finalize(x::T, xb::BFloat16, ::Type{SAT}) where T<:Microfloat
+    if isnan(xb)
+        return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
+    elseif isinf(xb) || is_outside_floatmax(xb, T)
+        return clamp_floatmax(x)
     else
-        throw(ArgumentError("Unknown overflow policy $P"))
+        return x
     end
 end
 
-"""
-    default_overflow_policy(T) -> Type{<:OverflowPolicy}
+function _finalize(x::T, xb::BFloat16, ::Type{OVF}) where T<:Microfloat
+    if isnan(xb)
+        return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
+    elseif isinf(xb) || is_outside_floatmax(xb, T)
+        return hasinf(T) ? clamp_inf(x) :
+               hasnan(T) ? nan(T) :
+               throw(DomainError(xb, "$T has no overflow sentinel; declare the type with overflow=SAT"))
+    else
+        return x
+    end
+end
 
-Default overflow policy for `Microfloat` type `T`. Keys on `hasinf(T)`:
-IEEE types default to `OVF` (finite overflow → Inf), all others default
-to `SAT` (clamp to `floatmax`). Matches PyTorch/Triton/Quartet-II practice
-for FP8/FP4.
-"""
-default_overflow_policy(::Type{T}) where T<:Microfloat = hasinf(T) ? OVF : SAT
-
-function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T<:Microfloat,P<:OverflowPolicy}
+function (::Type{T})(x::BFloat16) where T<:Microfloat
     if sign_bits(T) == 0 && signbit(x)
         throw(DomainError(x, "negative input to unsigned $T"))
     end
@@ -117,11 +120,10 @@ function (::Type{T})(x::BFloat16, ::Type{P}=default_overflow_policy(T)) where {T
 
     t_raw |= (reinterpret(Unsigned, x) >> 15 % UInt8) << (exponent_bits(T) + significand_bits(T)) & sign_mask(T)
 
-    return epilogue(reinterpret(T, t_raw), x, P)
+    return _finalize(reinterpret(T, t_raw), x, overflow_policy(T))
 end
 
-(::Type{T})(x::Number, args...) where {T<:Microfloat} = T(BFloat16(x), args...)
-(::Type{T})(::Type{P}) where {T<:Microfloat,P<:OverflowPolicy} = x -> T(x, P)
+(::Type{T})(x::Number) where {T<:Microfloat} = T(BFloat16(x))
 
 function _to_bfloat16(x::T) where {T<:Microfloat}
     t_raw = reinterpret(UInt8, x)

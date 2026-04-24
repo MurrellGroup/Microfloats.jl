@@ -1,6 +1,9 @@
 using Microfloats
 using Microfloats: non_finite_behavior, hasinf, hasnan, inf, nan,
-                   sign_bits, bitwidth, default_overflow_policy
+                   sign_bits, bitwidth, overflow_policy,
+                   IEEE, NanOnlyAllOnes, FiniteOnly,
+                   OverflowPolicy, SAT, OVF,
+                   @microfloat
 using Test
 using Random
 
@@ -17,6 +20,11 @@ using Random
 @microfloat UFloat5_E2M3  sign=0 exponent=2 significand=3 nonfinite=FiniteOnly
 @microfloat UFloat5_E3M2  sign=0 exponent=3 significand=2 nonfinite=FiniteOnly
 @microfloat UFloat3_E2M1  sign=0 exponent=2 significand=1 nonfinite=FiniteOnly
+
+# Twin of Float8_E4M3FN with the alternate (PyTorch/Triton) overflow policy.
+# Demonstrates the documented "reinterpret between twin types" escape hatch;
+# used in overflow.jl.
+@microfloat _E4M3FN_SAT exponent=4 significand=3 nonfinite=NanOnlyAllOnes overflow=SAT
 
 const SIGNED_TYPES = (
     Float8_E3M4, Float8_E4M3, Float8_E5M2,
