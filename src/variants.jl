@@ -29,9 +29,10 @@ for T in (
 
     ## Properties
     - Bits: `$(sign_bits($T))` sign + `$(exponent_bits($T))` exponent + `$(significand_bits($T))` significand (`$(bitwidth($T))` total)
-    - Non-finite behavior: `$(non_finite_behavior($T))`
     - Has Inf: `$(hasinf($T))`
     - Has NaN: `$(hasnan($T))`
+    - Non-finite behavior: `$(non_finite_behavior($T))`
+    - Overflow policy: `$(overflow_policy($T))`
     - Max normal: `$(Float64(floatmax($T)))`
     - Min normal: `$(Float64(floatmin($T)))`
     - Min subnormal: `$(significand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
