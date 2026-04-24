@@ -1,7 +1,8 @@
 """
     @microfloat name [kwargs...]
 
-Define a new type 
+Declare `name` as a new 8-bit primitive subtype of [`Microfloat`](@ref) and
+register its layout, non-finite encoding, and overflow policy.
 
 Default policy rule: `OVF` when the type has any non-finite sentinel
 (`IEEE` or `NanOnlyAllOnes`), else `SAT` (forced for `FiniteOnly` since no
@@ -18,8 +19,26 @@ sentinel encoding exists).
 
 ## Examples
 
-Converting from larger types rounds to the nearest even value, i.e.
-the value whose bit representation ends in `0`.
+Define a custom 6-bit type with 3 exponent bits, 2 significand bits, and
+no Inf/NaN encoding:
+
+```jldoctest
+julia> @microfloat MyFloat6 exponent=3 significand=2 nonfinite=Microfloats.FiniteOnly
+
+julia> MyFloat6(1.5)
+MyFloat6(1.5)
+
+julia> Microfloats.bitwidth(MyFloat6)
+6
+```
+
+Conversion from larger types rounds to the nearest representable value,
+breaking ties to even (the value whose bit representation ends in `0`):
+
+```jldoctest
+julia> Float8_E4M3(0.99)
+Float8_E4M3(1.0)
+```
 """
 macro microfloat(name, kwargs...)
     mod = @__MODULE__

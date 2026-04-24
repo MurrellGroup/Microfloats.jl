@@ -33,6 +33,7 @@ for T in (
     - Has Inf: `$(hasinf($T))`
     - Has NaN: `$(hasnan($T))`
     - Max normal: `$(Float64(floatmax($T)))`
-    - Min positive: `$(Float64(floatmin($T)))`
+    - Min normal: `$(Float64(floatmin($T)))`
+    - Min subnormal: `$(significand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
     """ $T
 end

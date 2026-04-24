@@ -3,9 +3,17 @@ import Base: signbit, exponent
 """
     Microfloat <: AbstractFloat
 
-Abstract type for floating-point numbers that fit within a single byte.
+Abstract supertype for byte-sized floating-point numbers. Concrete subtypes
+are 8-bit primitive types declared via [`@microfloat`](@ref).
 
-See [`@microfloat`](@ref) for type declaration.
+# Examples
+```jldoctest
+julia> Float8_E4M3 <: Microfloat
+true
+
+julia> Float8_E4M3(1.0) + Float8_E4M3(0.5)
+Float8_E4M3(1.5)
+```
 """
 abstract type Microfloat <: AbstractFloat end
 
@@ -36,13 +44,29 @@ end
 
 abstract type NonFiniteBehavior end
 
-"""IEEE-754-style encoding of Inf and NaN."""
+"""
+    IEEE <: NonFiniteBehavior
+
+IEEE-754-style sentinels: Inf is `exp=all-ones, significand=0`;
+NaN is `exp=all-ones, significand≠0`.
+"""
 abstract type IEEE           <: NonFiniteBehavior end
 
-"""NaN encoded as all-ones in exponent+significand; no Inf."""
+"""
+    NanOnlyAllOnes <: NonFiniteBehavior
+
+NaN is the unique all-ones bit pattern in exponent+significand
+(per sign); no Inf encoding. The slot that would otherwise be Inf is
+reclaimed for a finite value, extending dynamic range by one step.
+"""
 abstract type NanOnlyAllOnes <: NonFiniteBehavior end
 
-"""No Inf or NaN — every bit pattern is a finite value."""
+"""
+    FiniteOnly <: NonFiniteBehavior
+
+No Inf or NaN — every bit pattern is a finite value. Requires
+`overflow=`[`SAT`](@ref) since no sentinel encoding exists.
+"""
 abstract type FiniteOnly     <: NonFiniteBehavior end
 
 hasinf(::Type{IEEE})           = true
@@ -56,7 +80,20 @@ hasnan(::Type{FiniteOnly})     = false
 """
     non_finite_behavior(::Type{<:Microfloat}) -> Type{<:NonFiniteBehavior}
 
-Return `IEEE`, `NanOnlyAllOnes`, or `FiniteOnly` based on the assigned trait.
+Return [`IEEE`](@ref), [`NanOnlyAllOnes`](@ref), or [`FiniteOnly`](@ref)
+based on the trait registered for the concrete type by [`@microfloat`](@ref).
+
+# Examples
+```jldoctest
+julia> Microfloats.non_finite_behavior(Float8_E5M2)
+Microfloats.IEEE
+
+julia> Microfloats.non_finite_behavior(Float8_E4M3FN)
+Microfloats.NanOnlyAllOnes
+
+julia> Microfloats.non_finite_behavior(Float4_E2M1FN)
+Microfloats.FiniteOnly
+```
 """
 non_finite_behavior(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.non_finite_behavior(::Type{$T})`")
@@ -65,6 +102,15 @@ non_finite_behavior(::Type{T}) where T<:Microfloat =
     hasinf(::Type{<:Microfloat}) -> Bool
 
 Return `true` if the type can represent Inf, otherwise `false`.
+
+# Examples
+```jldoctest
+julia> Microfloats.hasinf(Float8_E5M2)
+true
+
+julia> Microfloats.hasinf(Float8_E4M3FN)
+false
+```
 """
 hasinf(::Type{T}) where T<:Microfloat = hasinf(non_finite_behavior(T))
 
@@ -72,6 +118,15 @@ hasinf(::Type{T}) where T<:Microfloat = hasinf(non_finite_behavior(T))
     hasnan(::Type{<:Microfloat}) -> Bool
 
 Return `true` if the type can represent NaN, otherwise `false`.
+
+# Examples
+```jldoctest
+julia> Microfloats.hasnan(Float8_E4M3FN)
+true
+
+julia> Microfloats.hasnan(Float4_E2M1FN)
+false
+```
 """
 hasnan(::Type{T}) where T<:Microfloat = hasnan(non_finite_behavior(T))
 

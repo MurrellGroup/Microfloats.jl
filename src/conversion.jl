@@ -43,10 +43,20 @@ SaturatingFloat8(240.0)
 abstract type SAT <: OverflowPolicy end
 
 """
-    overflow_policy(T) -> Type{<:OverflowPolicy}
+    overflow_policy(::Type{<:Microfloat}) -> Type{<:OverflowPolicy}
 
-Required trait method on every concrete [`Microfloat`](@ref) subtype.
-Returns [`OVF`](@ref) or [`SAT`](@ref). Registered by [`@microfloat`](@ref).
+Return the overflow policy registered by [`@microfloat`](@ref) — either
+[`OVF`](@ref) (out-of-range inputs go to a sentinel) or [`SAT`](@ref)
+(out-of-range inputs clamp to `±floatmax`).
+
+# Examples
+```jldoctest
+julia> Microfloats.overflow_policy(Float8_E5M2)
+Microfloats.OVF
+
+julia> Microfloats.overflow_policy(Float4_E2M1FN)
+Microfloats.SAT
+```
 """
 overflow_policy(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.overflow_policy(::Type{$T})`")
