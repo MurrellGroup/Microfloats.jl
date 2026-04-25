@@ -1,17 +1,17 @@
 abstract type OverflowPolicy end
 
 """
-    OVF
+Overflow policy that maps out-of-range inputs to a sentinel: `±Inf` if `T` has
+infinity, else `NaN` if `T` has NaN, else a `DomainError`.
 
-Overflow conversion: out-of-range finite inputs go to `±Inf` (IEEE) or `NaN` (NanOnlyAllOnes).
+| Input                  | [`IEEE`](@ref) | [`NanOnlyAllOnes`](@ref) | [`FiniteOnly`](@ref) |
+| ---------------------- | -------------- | ------------------------ | -------------------- |
+| `isnan(x)`             | NaN            | NaN                      | Error                |
+| `abs(x) > floatmax(T)` | ±Inf           | NaN                      | Error                |
 
-| Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
-| ---------------------- | --------------- | ------------- | ------------- |
-| `isnan(x)`             | NaN             | NaN           | Error         |
-| `abs(x) > floatmax(T)` | ±Inf            | NaN           | Error         |
+See also [`SAT`](@ref).
 
-## Examples
-
+# Examples
 ```jldoctest
 julia> @microfloat OverflowingFloat8 exponent=4 significand=3 overflow=Microfloats.OVF
 
@@ -22,17 +22,17 @@ OverflowingFloat8(Inf)
 abstract type OVF <: OverflowPolicy end
 
 """
-    SAT
+Overflow policy that clamps out-of-range inputs to `±floatmax(T)`. NaN inputs
+pass through if `T` has NaN, else throw a `DomainError`.
 
-Saturating conversion: out-of-range finite inputs clamp to `±floatmax(T)`.
+| Input                  | [`IEEE`](@ref) | [`NanOnlyAllOnes`](@ref) | [`FiniteOnly`](@ref) |
+| ---------------------- | -------------- | ------------------------ | -------------------- |
+| `isnan(x)`             | NaN            | NaN                      | Error                |
+| `abs(x) > floatmax(T)` | ±floatmax      | ±floatmax                | ±floatmax            |
 
-| Input Condition        | `T` has Inf+NaN | `T` has NaN   | `T` is finite |
-| ---------------------- | --------------- | ------------- | ------------- |
-| `isnan(x)`             | NaN             | NaN           | Error         |
-| `abs(x) > floatmax(T)` | ±floatmax       | ±floatmax     | ±floatmax     |
+See also [`OVF`](@ref).
 
-## Examples
-
+# Examples
 ```jldoctest
 julia> @microfloat SaturatingFloat8 exponent=4 significand=3 overflow=Microfloats.SAT
 

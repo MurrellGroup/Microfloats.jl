@@ -10,7 +10,7 @@ Microfloat
 @microfloat
 ```
 
-## API
+## Public API
 
 ### Non-Finite Behavior
 

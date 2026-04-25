@@ -8,11 +8,13 @@ include("utils.jl")
 @public bitwidth
 @public sign_bits, exponent_bits, significand_bits
 
+include("NonFiniteBehavior.jl")
+@public IEEE, NanOnlyAllOnes, FiniteOnly
+
 include("Microfloat.jl")
 export Microfloat
 @public hasinf, hasnan
 @public non_finite_behavior
-@public IEEE, NanOnlyAllOnes, FiniteOnly
 
 include("conversion.jl")
 @public overflow_policy

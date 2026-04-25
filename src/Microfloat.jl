@@ -42,41 +42,6 @@ function Base.show(io::IO, x::T) where T<:Microfloat
     return nothing
 end
 
-abstract type NonFiniteBehavior end
-
-"""
-    IEEE <: NonFiniteBehavior
-
-IEEE-754-style sentinels: Inf is `exp=all-ones, significand=0`;
-NaN is `exp=all-ones, significand≠0`.
-"""
-abstract type IEEE           <: NonFiniteBehavior end
-
-"""
-    NanOnlyAllOnes <: NonFiniteBehavior
-
-NaN is the unique all-ones bit pattern in exponent+significand
-(per sign); no Inf encoding. The slot that would otherwise be Inf is
-reclaimed for a finite value, extending dynamic range by one step.
-"""
-abstract type NanOnlyAllOnes <: NonFiniteBehavior end
-
-"""
-    FiniteOnly <: NonFiniteBehavior
-
-No Inf or NaN — every bit pattern is a finite value. Requires
-`overflow=`[`SAT`](@ref) since no sentinel encoding exists.
-"""
-abstract type FiniteOnly     <: NonFiniteBehavior end
-
-hasinf(::Type{IEEE})           = true
-hasinf(::Type{NanOnlyAllOnes}) = false
-hasinf(::Type{FiniteOnly})     = false
-
-hasnan(::Type{IEEE})           = true
-hasnan(::Type{NanOnlyAllOnes}) = true
-hasnan(::Type{FiniteOnly})     = false
-
 """
     non_finite_behavior(::Type{<:Microfloat}) -> Type{<:NonFiniteBehavior}
 
