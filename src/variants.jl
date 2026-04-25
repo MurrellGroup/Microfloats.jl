@@ -35,6 +35,7 @@ for T in (
     - Overflow policy: `$(overflow_policy($T))`
     - Max normal: `$(Float64(floatmax($T)))`
     - Min normal: `$(Float64(floatmin($T)))`
+    - Max subnormal: `$(significand_bits($T) > 0 ? Float64(prevfloat(floatmin($T))) : "N/A")`
     - Min subnormal: `$(significand_bits($T) > 0 ? Float64(nextfloat(zero($T))) : "N/A")`
     """ $T
 end
