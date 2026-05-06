@@ -7,7 +7,7 @@
 
 Microfloats is a Julia package that implements types and arithmetic (through wider intermediates) for sub-byte floating points, supporting arbitrary combinations of sign, exponent, and significand (mantissa) bits.
 
-Instances of a sub-8 bit floating point type are still 8 bits wide in memory; Microfloats serves as a base and reference for arithmetic operations and method dispatch, lending downstream packages a good abstraction for bitpacking and hardware acceleration.
+Instances of a sub-8 bit floating point type are still one byte wide in memory; Microfloats serves as a base for method dispatch and a reference for arithmetic operations, lending downstream packages a foundation for bitpacking and hardware acceleration.
 
 ## Usage
 
@@ -31,6 +31,6 @@ Pkg.add("Microfloats")
 ## See also
 
 - [FixedPointNumbers.jl](https://github.com/JuliaMath/FixedPointNumbers.jl)
-- [MicroFloatingPoints.jl](https://github.com/goualard-f/MicroFloatingPoints.jl)
-- [DLFP8Types.jl](https://github.com/chengchingwen/DLFP8Types.jl)
 - [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
+- [DLFP8Types.jl](https://github.com/chengchingwen/DLFP8Types.jl)
+- [MicroFloatingPoints.jl](https://github.com/goualard-f/MicroFloatingPoints.jl)
