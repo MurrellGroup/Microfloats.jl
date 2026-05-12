@@ -2,11 +2,13 @@
     @microfloat name [kwargs...]
 
 Declare `name` as a new 8-bit primitive subtype of [`Microfloat`](@ref) and
-register its layout, non-finite encoding, and overflow policy.
+register its layout, non-finite encoding, and *default* overflow policy.
+The default policy is what [`overflow_policy`](@ref) returns; callers
+override per-call with the `overflow=` keyword on the conversion.
 
-Default policy rule: `OVF` when the type has any non-finite sentinel
-(`IEEE` or `NanOnlyAllOnes`), else `SAT` (forced for `FiniteOnly` since no
-sentinel encoding exists).
+Default policy rule: [`OVF`](@ref) when the type has any non-finite
+sentinel ([`IEEE`](@ref) or [`NanOnlyAllOnes`](@ref)), else [`SAT`](@ref)
+(forced for [`FiniteOnly`](@ref) since no sentinel encoding exists).
 
 ## Keyword arguments
 
@@ -14,8 +16,10 @@ sentinel encoding exists).
 - `exponent`: Number of exponent bits: ≥ `1`
 - `significand`: Number of significand / mantissa bits: ≥ `0`
 - `nonfinite`: [`IEEE`](@ref) (default), [`NanOnlyAllOnes`](@ref), or [`FiniteOnly`](@ref).
-- `overflow`: Overflow handling during conversion from other types: [`SAT`](@ref) or [`OVF`](@ref). Default: `OVF` if the type has any
-  non-finite values (`IEEE`, `NanOnlyAllOnes`), otherwise `SAT` (`FiniteOnly`).
+- `overflow`: Default overflow policy *instance* — typically [`SAT`](@ref)
+  or [`OVF`](@ref). Default: `OVF` if the type has any non-finite values
+  (`IEEE`, `NanOnlyAllOnes`), otherwise `SAT` (`FiniteOnly`). Callers can
+  override per call with `T(x; overflow=SAT)`.
 
 ## Examples
 
@@ -91,14 +95,17 @@ macro microfloat(name, kwargs...)
         let lookup = Tuple($_to_bfloat16(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
             $mod.to_bfloat16(x::$T) = lookup[reinterpret(UInt8, x) + 0x0001]
         end
+        let strings = Tuple($_shortest_decimal_string(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
+            $mod.decimal_string(x::$T) = strings[reinterpret(UInt8, x) + 0x0001]
+        end
     end
 end
 
 function _validate_microfloat(T, nonfinite, overflow)
     (nonfinite isa Type && nonfinite <: NonFiniteBehavior) ||
         throw(ArgumentError("@microfloat($T): `nonfinite` must be IEEE, NanOnlyAllOnes, or FiniteOnly, got $nonfinite"))
-    (overflow isa Type && overflow <: OverflowPolicy) ||
-        throw(ArgumentError("@microfloat($T): `overflow` must be SAT or OVF, got $overflow"))
+    (overflow isa OverflowPolicy) ||
+        throw(ArgumentError("@microfloat($T): `overflow` must be an OverflowPolicy instance (e.g. SAT or OVF), got $overflow"))
     nonfinite === FiniteOnly && overflow === OVF &&
         throw(ArgumentError("@microfloat($T): `overflow=OVF` invalid for `nonfinite=FiniteOnly` (no sentinel encoding)"))
     return nothing

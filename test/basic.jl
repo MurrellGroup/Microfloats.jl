@@ -4,7 +4,7 @@
         @test precision(T) == Microfloats.significand_bits(T) + 1
         @test floatmax(T) > zero(T)
         @test isfinite(floatmax(T))
-        @test Microfloats.overflow_policy(T) <: Union{Microfloats.OVF, Microfloats.SAT}
+        @test Microfloats.overflow_policy(T) isa Union{Microfloats.Overflowing, Microfloats.Saturating}
 
         @test signbit(zero(T)) == false
 
@@ -38,6 +38,30 @@
 
     @test widen(Float8_E4M3) == BFloat16
     @test string(Float8_E4M3(1.0)) == "Float8_E4M3(1.0)"
+end
+
+@testset "Precision-aware show (shortest-roundtrip)" begin
+    @test string(Float8_E4M3(0.1))   == "Float8_E4M3(0.1)"     # was 0.1015625
+    @test string(Float8_E5M2(0.1))   == "Float8_E5M2(0.09)"    # was 0.09375
+    @test string(Float4_E2M1FN(1.5)) == "Float4_E2M1FN(1.5)"   # exact
+    @test string(Float8_E5M2(100.0)) == "Float8_E5M2(100.0)"
+    @test string(Float6_E3M2FN(100.0)) == "Float6_E3M2FN(30.0)"  # quantized to nearest representable
+
+    @testset "$T" for T in TYPES
+        used_mask = Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T)
+        for u in 0x00:0xff
+            (u & ~used_mask) != 0x00 && continue
+            x = reinterpret(T, u)
+            (isnan(x) || isinf(x)) && continue
+            s = Microfloats.decimal_string(x)
+            @test T(parse(Float64, s)) === x
+        end
+    end
+
+    # Non-finite values use Julia conventions, not the type-suffixed forms.
+    @test Microfloats.decimal_string(nan(Float8_E5M2)) == "NaN"
+    @test Microfloats.decimal_string(inf(Float8_E5M2)) == "Inf"
+    @test Microfloats.decimal_string(-inf(Float8_E5M2)) == "-Inf"
 end
 
 @testset "@microfloat" begin
@@ -208,4 +232,19 @@ end
     @test_throws ErrorException a * b
     # Same-type still works.
     @test a + a == Float8_E4M3FN(2.0)
+end
+
+@testset "Microfloat → standard numeric types" begin
+    x = Float8_E4M3(2.0)
+    @test Int(x) === 2
+    @test Int32(x) === Int32(2)
+    @test UInt8(x) === UInt8(2)
+    @test Float64(x) === 2.0
+    @test Float32(x) === 2.0f0
+    @test Float16(x) === Float16(2.0)
+    @test BigFloat(x) == big"2.0"
+    @test one(Float8_E4M3) |> Int === 1
+
+    # Cross-microfloat conversion (T<:Microfloat disambiguator).
+    @test Float8_E5M2(Float8_E4M3FN(2.0)) === Float8_E5M2(2.0)
 end

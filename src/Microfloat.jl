@@ -37,7 +37,7 @@ end
 function Base.show(io::IO, x::T) where T<:Microfloat
     show_typeinfo = get(IOContext(io), :typeinfo, nothing) != T
     show_typeinfo && print(io, repr(T), "(")
-    print(io, Float64(x))
+    print(io, decimal_string(x))
     show_typeinfo && print(io, ")")
     return nothing
 end
@@ -149,9 +149,13 @@ Base.typemin(::Type{T}) where T<:Microfloat =
     sign_bits(T) == 0 ? zero(T) : hasinf(T) ? -inf(T) : -floatmax(T)
 Base.typemax(::Type{T}) where T<:Microfloat = hasinf(T) ? inf(T) : floatmax(T)
 
-Base.floatmin(::Type{T}) where T<:Microfloat =
-    significand_bits(T) == 0 ? reinterpret(T, 0x00) :
-    reinterpret(T, UInt8(0x01) << significand_bits(T))
+function Base.floatmin(::Type{T}) where T<:Microfloat
+    significand_bits(T) == 0 && return reinterpret(T, 0x00)
+    bits = UInt8(0x01) << significand_bits(T)
+    hasinf(T) && bits == reinterpret(Unsigned, inf(T)) &&
+        throw(DomainError(T, "$T has no normal values"))
+    return reinterpret(T, bits)
+end
 
 Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
 Base.one(::Type{T}) where T<:Microfloat = T(true)

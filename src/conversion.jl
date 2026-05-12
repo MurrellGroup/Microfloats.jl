@@ -1,13 +1,26 @@
 abstract type OverflowPolicy end
 
+struct Overflowing <: OverflowPolicy end
+
+struct Saturating <: OverflowPolicy end
+
 """
-Overflow policy that maps out-of-range inputs to a sentinel: `±Inf` if `T` has
-infinity, else `NaN` if `T` has NaN, else a `DomainError`.
+    OVF
+
+Policy that maps numeric overflow to a sentinel — `±Inf` when the format
+has infinity, otherwise `NaN` when it has NaN, otherwise a `DomainError`.
+
+Pass directly as the value of `overflow=` in `@microfloat` declarations
+or as a per-call keyword.
 
 | Input                  | [`IEEE`](@ref) | [`NanOnlyAllOnes`](@ref) | [`FiniteOnly`](@ref) |
 | ---------------------- | -------------- | ------------------------ | -------------------- |
 | `isnan(x)`             | NaN            | NaN                      | Error                |
 | `abs(x) > floatmax(T)` | ±Inf           | NaN                      | Error                |
+
+The table above describes the *default-mode* (`RoundNearest`) behavior.
+Directed modes like `RoundToZero` saturate per IEEE-754 regardless of
+policy.
 
 See also [`SAT`](@ref).
 
@@ -17,13 +30,21 @@ julia> @microfloat OverflowingFloat8 exponent=4 significand=3 overflow=Microfloa
 
 julia> OverflowingFloat8(10000)
 OverflowingFloat8(Inf)
+
+julia> Float8_E4M3(10000; overflow=Microfloats.OVF)
+Float8_E4M3(Inf)
 ```
 """
-abstract type OVF <: OverflowPolicy end
+const OVF = Overflowing()
 
 """
-Overflow policy that clamps out-of-range inputs to `±floatmax(T)`. NaN inputs
-pass through if `T` has NaN, else throw a `DomainError`.
+    SAT
+
+Policy that clamps numeric overflow to `±floatmax(T)`. NaN inputs pass
+through if `T` has NaN, else throw a `DomainError`.
+
+Pass directly as the value of `overflow=` in `@microfloat` declarations
+or as a per-call keyword.
 
 | Input                  | [`IEEE`](@ref) | [`NanOnlyAllOnes`](@ref) | [`FiniteOnly`](@ref) |
 | ---------------------- | -------------- | ------------------------ | -------------------- |
@@ -38,87 +59,125 @@ julia> @microfloat SaturatingFloat8 exponent=4 significand=3 overflow=Microfloat
 
 julia> SaturatingFloat8(10000)
 SaturatingFloat8(240.0)
+
+julia> Float8_E4M3(10000; overflow=Microfloats.SAT)
+Float8_E4M3(240.0)
 ```
 """
-abstract type SAT <: OverflowPolicy end
+const SAT = Saturating()
 
 """
-    overflow_policy(::Type{<:Microfloat}) -> Type{<:OverflowPolicy}
+    overflow_policy(::Type{<:Microfloat}) -> OverflowPolicy
 
-Return the overflow policy registered by [`@microfloat`](@ref) — either
-[`OVF`](@ref) (out-of-range inputs go to a sentinel) or [`SAT`](@ref)
-(out-of-range inputs clamp to `±floatmax`).
+Return the overflow policy *instance* registered by
+[`@microfloat`](@ref) — typically [`OVF`](@ref) or [`SAT`](@ref). Sets
+the default for `overflow=...` at every conversion call site for this
+type; override per call with the `overflow` keyword.
 
 # Examples
 ```jldoctest
 julia> Microfloats.overflow_policy(Float8_E5M2)
-Microfloats.OVF
+Microfloats.Overflowing()
 
 julia> Microfloats.overflow_policy(Float4_E2M1FN)
-Microfloats.SAT
+Microfloats.Saturating()
 ```
 """
 overflow_policy(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.overflow_policy(::Type{$T})`")
 
-function rshift_round_to_even(x::UInt16, n::Int)
+function rshift_round_to_even(x::T, n::Int) where T<:Unsigned
     n <= 0 && return x >> n
-    x_32 = UInt32(x)
-    lower = x_32 & ((UInt32(1) << n) - UInt32(1))
-    half = UInt32(1) << (n - 1)
-    up = (lower > half) | ((lower == half) & (((x_32 >> n) & UInt32(1)) == UInt32(1)))
-    UInt16((x_32 >> n) + (up ? 1 : 0))
+    n > 8 * sizeof(T) && return zero(T)
+    mask = (T(1) << n) - T(1)
+    half = T(1) << (n - 1)
+    lower = x & mask
+    up = (lower > half) | ((lower == half) & (((x >> n) & T(1)) == T(1)))
+    (x >> n) + (up ? T(1) : T(0))
 end
 
-is_outside_floatmax(xb::BFloat16, ::Type{T}) where T<:Microfloat =
-    reinterpret(Unsigned, abs(xb)) > reinterpret(Unsigned, BFloat16(floatmax(T)))
+function rshift_round_ties_away(x::T, n::Int) where T<:Unsigned
+    n <= 0 && return x >> n
+    n > 8 * sizeof(T) && return zero(T)
+    mask = (T(1) << n) - T(1)
+    half = T(1) << (n - 1)
+    lower = x & mask
+    up = lower >= half
+    (x >> n) + (up ? T(1) : T(0))
+end
+
+rshift_truncate(x::T, n::Int) where T<:Unsigned = x >> n
+
+function rshift_round_up_magnitude(x::T, n::Int) where T<:Unsigned
+    n <= 0 && return x >> n
+    mask = (T(1) << n) - T(1)
+    has_low_bits = (x & mask) != T(0)
+    (x >> n) + (has_low_bits ? T(1) : T(0))
+end
+
+is_outside_floatmax(x::Float32, ::Type{T}) where T<:Microfloat =
+    reinterpret(Unsigned, abs(x)) > reinterpret(Unsigned, Float32(floatmax(T)))
 clamp_floatmax(x::T) where T<:Microfloat = signbit(x) ? -floatmax(T) : floatmax(T)
 clamp_inf(x::T) where T<:Microfloat = signbit(x) ? -inf(T) : inf(T)
 
-function _finalize(x::T, xb::BFloat16, ::Type{SAT}) where T<:Microfloat
-    if isnan(xb)
-        return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
-    elseif isinf(xb) || is_outside_floatmax(xb, T)
+@inline mode_overflows_to_inf(::RoundingMode{:Nearest},          ::Bool) = true
+@inline mode_overflows_to_inf(::RoundingMode{:NearestTiesAway},  ::Bool) = true
+@inline mode_overflows_to_inf(::RoundingMode{:FromZero},         ::Bool) = true
+@inline mode_overflows_to_inf(::RoundingMode{:ToZero},           ::Bool) = false
+@inline mode_overflows_to_inf(::RoundingMode{:Up},   signbit::Bool) = !signbit
+@inline mode_overflows_to_inf(::RoundingMode{:Down}, signbit::Bool) = signbit
+
+function apply_overflow_policy(x::T, xf::Float32, mode::RoundingMode, ::Overflowing) where T<:Microfloat
+    if isnan(xf)
+        return hasnan(T) ? nan(T) : throw(DomainError(xf, "$T has no NaN"))
+    elseif isinf(xf) || is_outside_floatmax(xf, T)
+        if mode_overflows_to_inf(mode, signbit(xf))
+            return hasinf(T) ? clamp_inf(x) :
+                   hasnan(T) ? nan(T) :
+                   throw(DomainError(xf, "$T has no overflow sentinel; use overflow=SAT"))
+        else
+            return clamp_floatmax(x)
+        end
+    else
+        return x
+    end
+end
+
+function apply_overflow_policy(x::T, xf::Float32, ::RoundingMode, ::Saturating) where T<:Microfloat
+    if isnan(xf)
+        return hasnan(T) ? nan(T) : throw(DomainError(xf, "$T has no NaN"))
+    elseif isinf(xf) || is_outside_floatmax(xf, T)
         return clamp_floatmax(x)
     else
         return x
     end
 end
 
-function _finalize(x::T, xb::BFloat16, ::Type{OVF}) where T<:Microfloat
-    if isnan(xb)
-        return hasnan(T) ? nan(T) : throw(DomainError(xb, "$T has no NaN"))
-    elseif isinf(xb) || is_outside_floatmax(xb, T)
-        return hasinf(T) ? clamp_inf(x) :
-               hasnan(T) ? nan(T) :
-               throw(DomainError(xb, "$T has no overflow sentinel; declare the type with overflow=SAT"))
-    else
-        return x
-    end
-end
-
-function (::Type{T})(x::BFloat16) where T<:Microfloat
+# All rounding modes share this body; the `rshift` helper varies.
+function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
+                              mode::RoundingMode, policy::OverflowPolicy
+                              ) where {T<:Microfloat, F}
     if sign_bits(T) == 0 && signbit(x)
         throw(DomainError(x, "negative input to unsigned $T"))
     end
     iszero(x) && return signbit(x) ? -zero(T) : zero(T)
 
-    bf16_exp  = Int((reinterpret(Unsigned, x) >> 7) & 0x00ff)
-    bf16_frac = UInt16(reinterpret(Unsigned, x) & 0x007f)
+    f32_raw  = reinterpret(UInt32, x)
+    f32_exp  = Int((f32_raw >> 23) & UInt32(0x000000ff))
+    f32_frac = f32_raw & UInt32(0x007fffff)
 
-    sig8 = bf16_exp == 0 ? bf16_frac : (0x0080 | bf16_frac)
-    true_exp = bf16_exp == 0 ? -126 : (bf16_exp - 127)
+    sig24 = f32_exp == 0 ? f32_frac : (UInt32(0x00800000) | f32_frac)
+    true_exp = f32_exp == 0 ? -126 : (f32_exp - 127)
     t_exp = true_exp + exponent_bias(T)
 
-    t_raw = 0x00
     if t_exp <= 0
         # Subnormal path in target format
-        shift = t_exp + significand_bits(T) - 8
-        sub_q = rshift_round_to_even(sig8, -shift)
-        max_frac = UInt16((1 << significand_bits(T)) - 1)
+        shift = t_exp + significand_bits(T) - 24
+        sub_q = rshift(sig24, -shift)
+        max_frac = UInt32((1 << significand_bits(T)) - 1)
         if sub_q == 0
             t_raw = 0x00
-        elseif sub_q == (UInt16(1) << significand_bits(T))
+        elseif sub_q == (UInt32(1) << significand_bits(T))
             t_raw = UInt8(1) << significand_bits(T)
         else
             sub_q = min(sub_q, max_frac)
@@ -126,19 +185,17 @@ function (::Type{T})(x::BFloat16) where T<:Microfloat
         end
     else
         # Normal path in target format
-        shift = 7 - significand_bits(T)
-        total = shift >= 0 ? rshift_round_to_even(sig8, shift) : (sig8 << (-shift))
+        shift = 23 - significand_bits(T)
+        total = rshift(sig24, shift)
         if total == 0
             t_raw = 0x00
         else
-            t_exp_rounded = t_exp + (total >> (significand_bits(T) + 1))
+            t_exp_rounded = t_exp + Int(total >> (significand_bits(T) + 1))
             max_exp = (1 << exponent_bits(T)) - 1
             if t_exp_rounded > max_exp
+                t_exp_rounded = max_exp
                 if !hasinf(T)
-                    t_exp_rounded = max_exp
-                    total = (UInt16(1) << significand_bits(T)) | UInt16((1 << significand_bits(T)) - 1)
-                else
-                    t_exp_rounded = max_exp
+                    total = (UInt32(1) << significand_bits(T)) | UInt32((1 << significand_bits(T)) - 1)
                 end
             end
             frac_field = UInt8(total) & UInt8((1 << significand_bits(T)) - 1)
@@ -146,12 +203,49 @@ function (::Type{T})(x::BFloat16) where T<:Microfloat
         end
     end
 
-    t_raw |= (reinterpret(Unsigned, x) >> 15 % UInt8) << (exponent_bits(T) + significand_bits(T)) & sign_mask(T)
+    t_raw |= (((f32_raw >> 31) % UInt8) << (exponent_bits(T) + significand_bits(T))) & sign_mask(T)
 
-    return _finalize(reinterpret(T, t_raw), x, overflow_policy(T))
+    return apply_overflow_policy(reinterpret(T, t_raw), x, mode, policy)
 end
 
-(::Type{T})(x::Number) where {T<:Microfloat} = T(BFloat16(x))
+(::Type{T})(x::Float32, mode::RoundingMode{:Nearest};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_to_even, mode, overflow)
+(::Type{T})(x::Float32, mode::RoundingMode{:NearestTiesAway};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_ties_away, mode, overflow)
+(::Type{T})(x::Float32, mode::RoundingMode{:ToZero};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_truncate, mode, overflow)
+(::Type{T})(x::Float32, mode::RoundingMode{:FromZero};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow)
+
+# RoundUp/RoundDown are sign-dependent: "toward +∞" rounds the magnitude up
+# for positive inputs but truncates the magnitude for negative inputs (which
+# moves the value toward zero, i.e., closer to +∞). RoundDown is the mirror.
+(::Type{T})(x::Float32, mode::RoundingMode{:Up};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    signbit(x) ? _round_to_microfloat(T, x, rshift_truncate,           mode, overflow) :
+                 _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow)
+(::Type{T})(x::Float32, mode::RoundingMode{:Down};
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    signbit(x) ? _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow) :
+                 _round_to_microfloat(T, x, rshift_truncate,           mode, overflow)
+
+# Errors on unsupported modes instead of recursing through the Real-level fallback below.
+(::Type{T})(x::Float32, mode::RoundingMode;
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    throw(ArgumentError("$T does not support rounding mode $mode"))
+
+# `Real` (not `Number`) avoids colliding with Base's
+# `(::Type{T})(::Real, ::RoundingMode) where T<:AbstractFloat`.
+(::Type{T})(x::Real;
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    T(x, RoundNearest; overflow=overflow)
+(::Type{T})(x::Real, mode::RoundingMode;
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    T(Float32(x), mode; overflow=overflow)
 
 function _to_bfloat16(x::T) where {T<:Microfloat}
     t_raw = reinterpret(UInt8, x)
@@ -174,7 +268,7 @@ function _to_bfloat16(x::T) where {T<:Microfloat}
     bias = exponent_bias(T)
 
     if t_exponent_field == 0 && M > 0 # Subnormal
-        nlz = M - 1 - floor(Int, log2(t_fraction_field))
+        nlz = leading_zeros(t_fraction_field) + M - 16
         t_significand_total = UInt16(t_fraction_field) << (nlz + 1)
         t_true_exponent = -nlz - bias
     else # Normal
@@ -213,7 +307,51 @@ end
 # `@microfloat` adds a new method to `to_bfloat16`
 function to_bfloat16 end
 
-# user can add specialized conversions to `BFloat16` itself
-BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
+function _format_sci(f64::Float64, n::Int)
+    ax = abs(f64)
+    e = floor(Int, log10(ax))
+    k = n - 1 - e
+    scaled = k >= 0 ? ax * exp10(k) : ax / exp10(-k)
+    m = round(Int, scaled)
+    if m >= 10^n
+        m ÷= 10
+        e += 1
+    end
+    digits = lpad(string(m), n, '0')
+    mantissa = n == 1 ? digits * ".0" : digits[1:1] * "." * digits[2:n]
+    return (signbit(f64) ? "-" : "") * mantissa * "e" * string(e)
+end
 
-(::Type{T})(x::Microfloat) where {T<:AbstractFloat} = T(BFloat16(x))
+# Try increasing precision until the rounded decimal round-trips through `T`.
+# 4 sig digits suffices on precision grounds, but near floatmax under an OVF
+# policy the rounded value can land in the NaN sentinel for several ndig in a
+# row — empirically up to 6 (e.g. `_E1M7_NaN(0xfe) == 3.96875`). 9 is generous
+# headroom given the 8-bit-total constraint. When Ryu's shortest form blows up
+# on values not exactly representable in Float64
+# (e.g. "2.9999999999999998e-40"), detect via length and reformat.
+function _shortest_decimal_string(x::T) where T<:Microfloat
+    isnan(x) && return "NaN"
+    isinf(x) && return signbit(x) ? "-Inf" : "Inf"
+    iszero(x) && return signbit(x) ? "-0.0" : "0.0"
+    f64 = Float64(x)
+    for ndig in 1:9
+        rounded = round(f64, sigdigits=ndig)
+        T(rounded) === x || continue
+        s = string(rounded)
+        length(s) <= ndig + 8 && return s
+        return _format_sci(f64, ndig)
+    end
+    error("unreachable: no round-tripping decimal in 1:9 sig digits for $T")
+end
+
+# `@microfloat` adds a new method to `decimal_string`
+function decimal_string end
+
+# Every Microfloat is exactly representable in BFloat16 (M ≤ 7, E ≤ 8), so
+# widening through BFloat16 is lossless. Base / BFloat16s.jl supply
+# `T(::BFloat16)` for the standard numeric types (Float16/32/64, Int*, BigFloat).
+BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
+(::Type{T})(x::Microfloat) where T<:Number = T(BFloat16(x))
+# Microfloat → Microfloat: route through Float32 (matches the Real-input path
+# and avoids the BFloat16 intermediate's narrower exponent dynamic range).
+(::Type{T})(x::Microfloat) where T<:Microfloat = T(Float32(x))
