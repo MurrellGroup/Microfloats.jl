@@ -20,7 +20,7 @@ or as a per-call keyword.
 
 The table above describes the *default-mode* (`RoundNearest`) behavior.
 Directed modes like `RoundToZero` saturate per IEEE-754 regardless of
-policy — see [`apply_overflow_policy`](@ref).
+policy.
 
 See also [`SAT`](@ref).
 
