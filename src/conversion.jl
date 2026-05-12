@@ -22,7 +22,7 @@ The table above describes the *default-mode* (`RoundNearest`) behavior.
 Directed modes like `RoundToZero` saturate per IEEE-754 regardless of
 policy — see [`apply_overflow_policy`](@ref).
 
-See also [`Saturating`](@ref), [`SAT`](@ref).
+See also [`SAT`](@ref).
 
 # Examples
 ```jldoctest
@@ -51,7 +51,7 @@ or as a per-call keyword.
 | `isnan(x)`             | NaN            | NaN                      | Error                |
 | `abs(x) > floatmax(T)` | ±floatmax      | ±floatmax                | ±floatmax            |
 
-See also [`Overflowing`](@ref), [`OVF`](@ref).
+See also [`OVF`](@ref).
 
 # Examples
 ```jldoctest
