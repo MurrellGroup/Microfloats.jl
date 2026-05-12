@@ -1,6 +1,6 @@
 name = "Microfloats"
 uuid = "31c70f10-a750-4521-b13c-797315ae2933"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Anton Oresten <antonoresten@gmail.com> and contributors"]
 
 [workspace]
