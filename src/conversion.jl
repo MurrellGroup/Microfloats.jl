@@ -322,30 +322,36 @@ function _format_sci(f64::Float64, n::Int)
     return (signbit(f64) ? "-" : "") * mantissa * "e" * string(e)
 end
 
-# 4 sig digits cover every Microfloat variant. When the rounded value isn't
-# Float64-representable, Ryu's shortest form blows up
-# (e.g. "2.9999999999999998e-40"); detect via length and reformat.
+# Try increasing precision until the rounded decimal round-trips through `T`.
+# 4 sig digits suffices on precision grounds, but near floatmax under an OVF
+# policy the rounded value can land in the NaN sentinel for several ndig in a
+# row — empirically up to 6 (e.g. `_E1M7_NaN(0xfe) == 3.96875`). 9 is generous
+# headroom given the 8-bit-total constraint. When Ryu's shortest form blows up
+# on values not exactly representable in Float64
+# (e.g. "2.9999999999999998e-40"), detect via length and reformat.
 function _shortest_decimal_string(x::T) where T<:Microfloat
     isnan(x) && return "NaN"
     isinf(x) && return signbit(x) ? "-Inf" : "Inf"
     iszero(x) && return signbit(x) ? "-0.0" : "0.0"
     f64 = Float64(x)
-    for ndig in 1:4
+    for ndig in 1:9
         rounded = round(f64, sigdigits=ndig)
         T(rounded) === x || continue
         s = string(rounded)
         length(s) <= ndig + 8 && return s
         return _format_sci(f64, ndig)
     end
-    return string(f64)
+    error("unreachable: no round-tripping decimal in 1:9 sig digits for $T")
 end
 
 # `@microfloat` adds a new method to `decimal_string`
 function decimal_string end
 
 # Every Microfloat is exactly representable in BFloat16 (M ≤ 7, E ≤ 8), so
-# widening through BFloat16 is lossless.
+# widening through BFloat16 is lossless. Base / BFloat16s.jl supply
+# `T(::BFloat16)` for the standard numeric types (Float16/32/64, Int*, BigFloat).
 BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
-(::Type{Float32})(x::Microfloat) = Float32(BFloat16(x))
-(::Type{Float64})(x::Microfloat) = Float64(BFloat16(x))
-(::Type{Float16})(x::Microfloat) = Float16(BFloat16(x))
+(::Type{T})(x::Microfloat) where T<:Number = T(BFloat16(x))
+# Microfloat → Microfloat: route through Float32 (matches the Real-input path
+# and avoids the BFloat16 intermediate's narrower exponent dynamic range).
+(::Type{T})(x::Microfloat) where T<:Microfloat = T(Float32(x))

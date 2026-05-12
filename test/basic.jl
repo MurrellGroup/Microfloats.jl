@@ -233,3 +233,18 @@ end
     # Same-type still works.
     @test a + a == Float8_E4M3FN(2.0)
 end
+
+@testset "Microfloat → standard numeric types" begin
+    x = Float8_E4M3(2.0)
+    @test Int(x) === 2
+    @test Int32(x) === Int32(2)
+    @test UInt8(x) === UInt8(2)
+    @test Float64(x) === 2.0
+    @test Float32(x) === 2.0f0
+    @test Float16(x) === Float16(2.0)
+    @test BigFloat(x) == big"2.0"
+    @test one(Float8_E4M3) |> Int === 1
+
+    # Cross-microfloat conversion (T<:Microfloat disambiguator).
+    @test Float8_E5M2(Float8_E4M3FN(2.0)) === Float8_E5M2(2.0)
+end
