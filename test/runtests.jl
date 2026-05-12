@@ -56,6 +56,8 @@ const MX_E8M0 = Float8_E8M0FNU
 @testset "Microfloats" begin
     include("basic.jl")
     include("overflow.jl")
+    include("floatmin.jl")
+    include("rounding_modes.jl")
     include("mx_compliance.jl")
     include("mx_properties.jl")
     include("dlfp8_parity.jl")

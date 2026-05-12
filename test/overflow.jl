@@ -7,7 +7,7 @@
         @test T(+Inf) == +inf(T)
         @test T(-Inf) == -inf(T)
 
-        big = nextfloat(BFloat16(floatmax(T)))
+        big = nextfloat(Float32(floatmax(T)))
         @test T(+big) == +inf(T)
         @test T(-big) == -inf(T)
     end
@@ -25,7 +25,7 @@ end
         @test isnan(T(+Inf))
         @test isnan(T(-Inf))
 
-        big = nextfloat(BFloat16(floatmax(T)))
+        big = nextfloat(Float32(floatmax(T)))
         @test isnan(T(+big))
         @test isnan(T(-big))
     end
@@ -39,7 +39,7 @@ end
         @test isnan(T(+Inf))
         @test_throws DomainError T(-Inf)
 
-        big = nextfloat(BFloat16(floatmax(T)))
+        big = nextfloat(Float32(floatmax(T)))
         @test isnan(T(big))
     end
 end
@@ -54,7 +54,7 @@ end
         @test T(+Inf) == +floatmax(T)
         @test T(-Inf) == -floatmax(T)
 
-        big = nextfloat(BFloat16(floatmax(T)))
+        big = nextfloat(Float32(floatmax(T)))
         @test T(+big) == +floatmax(T)
         @test T(-big) == -floatmax(T)
     end
@@ -69,7 +69,7 @@ end
     # Float8_E4M3FN but with overflow=SAT (PyTorch/Triton convention).
     # Shows the documented escape hatch for the non-default policy.
     @test overflow_policy(_E4M3FN_SAT) === SAT
-    big = nextfloat(BFloat16(floatmax(_E4M3FN_SAT)))
+    big = nextfloat(Float32(floatmax(_E4M3FN_SAT)))
     @test _E4M3FN_SAT(big) == floatmax(_E4M3FN_SAT)            # SAT: overflow → floatmax
     @test isnan(Float8_E4M3FN(big))                            # OVF: overflow → NaN
     # Bit layout is identical, so reinterpret is a free relabel.
