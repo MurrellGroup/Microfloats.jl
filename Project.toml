@@ -1,10 +1,10 @@
 name = "Microfloats"
 uuid = "31c70f10-a750-4521-b13c-797315ae2933"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["Anton Oresten <antonoresten@gmail.com> and contributors"]
 
 [workspace]
-projects = ["test"]
+projects = ["test", "docs"]
 
 [deps]
 BFloat16s = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
