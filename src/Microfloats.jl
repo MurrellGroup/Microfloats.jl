@@ -4,8 +4,9 @@ using Republic
 
 import BFloat16s: BFloat16
 
+@republic import BitPacking: bitwidth
+
 include("utils.jl")
-@public bitwidth
 @public sign_bits, exponent_bits, significand_bits
 
 include("NonFiniteBehavior.jl")
