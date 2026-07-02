@@ -53,12 +53,18 @@ const MX_E2M3 = Float6_E2M3FN
 const MX_E2M1 = Float4_E2M1FN
 const MX_E8M0 = Float8_E8M0FNU
 
-@testset "Microfloats" begin
+import CUDACore
+
+@testset "Microfloats.jl" begin
     include("basic.jl")
     include("overflow.jl")
     include("floatmin.jl")
     include("rounding_modes.jl")
+    include("vectorization.jl")
     include("mx_compliance.jl")
     include("mx_properties.jl")
     include("dlfp8_parity.jl")
+
+    # extensions
+    include("cuda_extension.jl")
 end
