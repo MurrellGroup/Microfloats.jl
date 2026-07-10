@@ -25,11 +25,11 @@ jobs:
         version:
           - '1.10'
           - 'pre'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
-          - aarch64
+        include:
+          - os: ubuntu-latest
+            arch: x64
+          - os: ubuntu-24.04-arm
+            arch: aarch64
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
