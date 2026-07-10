@@ -212,7 +212,7 @@ function Base.prevfloat(x::T) where T<:Microfloat
     end
 end
 
-Base.decompose(x::T) where T<:Microfloat = Base.decompose(BFloat16(x))
+Base.decompose(x::T) where T<:Microfloat = Base.decompose(Float32(x))
 
 Base.widen(::Type{T}) where T<:Microfloat = BFloat16
 

@@ -247,7 +247,11 @@ end
             overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
     T(Float32(x), mode; overflow=overflow)
 
-function _to_bfloat16(x::T) where {T<:Microfloat}
+# Returns the BFloat16 encoding as raw UInt16 bits. Internal plumbing stays
+# in bits because on Julia >= 1.12 a BFloat16 *value* crossing a function-call
+# boundary has subnormals flushed to zero on CPUs with native BF16
+# instructions (e.g. Zen 4), which corrupts E8M0's 2^-127.
+function _to_bfloat16_bits(x::T) where {T<:Microfloat}
     t_raw = reinterpret(UInt8, x)
 
     t_sign = (sign_bits(T) == 1) && (t_raw & (UInt8(1) << (exponent_bits(T) + significand_bits(T))) != 0)
@@ -257,11 +261,11 @@ function _to_bfloat16(x::T) where {T<:Microfloat}
     bf16_sign_bit = UInt16(t_sign ? 1 : 0) << 15
 
     if isinf(x)
-        return reinterpret(BFloat16, bf16_sign_bit | 0x7f80)
+        return bf16_sign_bit | 0x7f80
     elseif isnan(x)
-        return reinterpret(BFloat16, bf16_sign_bit | 0x7fc0)
+        return bf16_sign_bit | 0x7fc0
     elseif iszero(x)
-        return reinterpret(BFloat16, bf16_sign_bit)
+        return bf16_sign_bit
     end
 
     M = significand_bits(T)
@@ -287,25 +291,27 @@ function _to_bfloat16(x::T) where {T<:Microfloat}
         bf16_exponent_field += 1
     end
     if bf16_exponent_field >= 0xff
-        return reinterpret(BFloat16, bf16_sign_bit | 0x7f80)
+        return bf16_sign_bit | 0x7f80
     elseif bf16_exponent_field <= 0
         shift_to_bf16_sub = t_true_exponent + 133 - M
         sub_q = shift_to_bf16_sub >= 0 ? (t_significand_total << shift_to_bf16_sub) : rshift_round_to_even(t_significand_total, -shift_to_bf16_sub)
         if sub_q == 0
-            return reinterpret(BFloat16, bf16_sign_bit)
+            return bf16_sign_bit
         elseif sub_q >= 0x80
-            return reinterpret(BFloat16, bf16_sign_bit | UInt16(0x0080))
+            return bf16_sign_bit | UInt16(0x0080)
         else
-            return reinterpret(BFloat16, bf16_sign_bit | UInt16(sub_q & 0x7f))
+            return bf16_sign_bit | UInt16(sub_q & 0x7f)
         end
     else
         bf16_raw_out = bf16_sign_bit | (UInt16(bf16_exponent_field & 0xff) << 7) | UInt16((bf16_significand_total - 0x80) & 0x7f)
-        return reinterpret(BFloat16, bf16_raw_out)
+        return bf16_raw_out
     end
 end
 
-# `@microfloat` adds a new method to `to_bfloat16`
-function to_bfloat16 end
+# `@microfloat` adds a new method to `to_bfloat16_bits`
+function to_bfloat16_bits end
+
+to_bfloat16(x::Microfloat) = reinterpret(BFloat16, to_bfloat16_bits(x))
 
 function _format_sci(f64::Float64, n::Int)
     ax = abs(f64)
@@ -348,10 +354,15 @@ end
 function decimal_string end
 
 # Every Microfloat is exactly representable in BFloat16 (M ≤ 7, E ≤ 8), so
-# widening through BFloat16 is lossless. Base / BFloat16s.jl supply
-# `T(::BFloat16)` for the standard numeric types (Float16/32/64, Int*, BigFloat).
+# widening through the BFloat16 *encoding* is lossless. The widening shifts
+# the raw bits into a Float32 directly instead of materializing a BFloat16:
+# on Julia >= 1.12, a BFloat16 value crossing a function-call boundary has
+# subnormals flushed to zero on CPUs with native BF16 instructions (e.g.
+# Zen 4), which corrupts E8M0's 2^-127. Base then supplies `T(::Float32)`
+# for the standard numeric types (Float16/64, Int*, BigFloat).
 BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
-(::Type{T})(x::Microfloat) where T<:Number = T(BFloat16(x))
+(::Type{T})(x::Microfloat) where T<:Number =
+    T(reinterpret(Float32, UInt32(to_bfloat16_bits(x)) << 16))
 # Microfloat → Microfloat: route through Float32 (matches the Real-input path
 # and avoids the BFloat16 intermediate's narrower exponent dynamic range).
 (::Type{T})(x::Microfloat) where T<:Microfloat = T(Float32(x))

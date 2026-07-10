@@ -92,8 +92,8 @@ macro microfloat(name, kwargs...)
         $mod.float_bits(::Type{$T}) = ($S, $E, $M)
         $mod.non_finite_behavior(::Type{$T}) = $nonfinite_expr
         $mod.overflow_policy(::Type{$T}) = $overflow_expr
-        let lookup = Tuple($_to_bfloat16(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
-            $mod.to_bfloat16(x::$T) = lookup[reinterpret(UInt8, x) + 0x0001]
+        let lookup = Tuple($_to_bfloat16_bits(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
+            $mod.to_bfloat16_bits(x::$T) = lookup[reinterpret(UInt8, x) + 0x0001]
         end
         let strings = Tuple($_shortest_decimal_string(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
             $mod.decimal_string(x::$T) = strings[reinterpret(UInt8, x) + 0x0001]
