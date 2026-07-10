@@ -61,4 +61,7 @@ const MX_E8M0 = Float8_E8M0FNU
     include("mx_compliance.jl")
     include("mx_properties.jl")
     include("dlfp8_parity.jl")
+    
+    # extensions
+    include("extensions/CUDACore.jl")
 end
