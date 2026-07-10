@@ -22,14 +22,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.10'
-          - '1.12'
-          - 'pre'
         include:
-          - os: ubuntu-latest
+          - version: '1.10'
+            os: ubuntu-latest
             arch: x64
-          - os: ubuntu-24.04-arm
+          - version: '1.12'
+            os: ubuntu-latest
+            arch: x64
+          - version: 'pre'
+            os: ubuntu-latest
+            arch: x64
+          - version: '1.10'
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - version: '1.12'
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - version: 'pre'
+            os: ubuntu-24.04-arm
             arch: aarch64
     steps:
       - uses: actions/checkout@v7
