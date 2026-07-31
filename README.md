@@ -14,12 +14,12 @@ Instances of a sub-8 bit floating point type are still one byte wide in memory; 
 Define your own primitive type with the macro:
 
 ```julia
-using Microfloats
+using Microfloats: @microfloat
 
-@microfloat MyE5M2 sign=1 exponent=5 significand=2 nonfinite=Microfloats.IEEE
+@microfloat Float8_E5M2 sign=1 exponent=5 significand=2 nonfinite=Microfloats.IEEE
 ```
 
-or see the documentation for a list of predefined types.
+or see [predefined types](https://murrellgroup.github.io/Microfloats.jl/stable/predefined/) in the documentation.
 
 ## Installation
 
