@@ -26,6 +26,9 @@ jobs:
           - version: '1.10'
             os: ubuntu-latest
             arch: x64
+          - version: '1.11'
+            os: ubuntu-latest
+            arch: x64
           - version: '1.12'
             os: ubuntu-latest
             arch: x64
@@ -33,6 +36,9 @@ jobs:
             os: ubuntu-latest
             arch: x64
           - version: '1.10'
+            os: ubuntu-24.04-arm
+            arch: aarch64
+          - version: '1.11'
             os: ubuntu-24.04-arm
             arch: aarch64
           - version: '1.12'
