@@ -12,6 +12,7 @@
 # NanOnlyAllOnes (FN-suffixed)
 @microfloat Float8_E4M3FN  exponent=4 significand=3 nonfinite=NanOnlyAllOnes
 @microfloat Float8_E8M0FNU sign=0 exponent=8 significand=0 nonfinite=NanOnlyAllOnes
+@microfloat Float8_E5M3FNU sign=0 exponent=5 significand=3 nonfinite=NanOnlyAllOnes
 
 # FiniteOnly
 @microfloat Float6_E2M3FN  exponent=2 significand=3 nonfinite=FiniteOnly
@@ -20,7 +21,7 @@
 
 for T in (
     :Float8_E5M2, :Float8_E4M3, :Float8_E3M4,
-    :Float8_E4M3FN, :Float8_E8M0FNU,
+    :Float8_E4M3FN, :Float8_E8M0FNU, :Float8_E5M3FNU,
     :Float6_E2M3FN, :Float6_E3M2FN,
     :Float4_E2M1FN,
 )
