@@ -18,12 +18,28 @@
 @microfloat Float6_E3M2FN  exponent=3 significand=2 nonfinite=FiniteOnly
 @microfloat Float4_E2M1FN  exponent=2 significand=1 nonfinite=FiniteOnly
 
-for T in (
+const BUILTIN_TYPES = (
     :Float8_E5M2, :Float8_E4M3, :Float8_E3M4,
     :Float8_E4M3FN, :Float8_E8M0FNU,
     :Float6_E2M3FN, :Float6_E3M2FN,
     :Float4_E2M1FN,
 )
+
+# Register lookup-table `cvt` methods for every ordered pair of built-in
+# types (including identity, which normalizes NaN encodings like the generic
+# path does). Tables are built lazily per (mode, policy) on first use.
+# Pairs with hand-written bit-twiddling methods (specializations.jl) are
+# excluded so the definitions don't collide.
+const TWIDDLED_PAIRS = (
+    (:Float4_E2M1FN, :Float8_E4M3),
+    (:Float4_E2M1FN, :Float8_E4M3FN),
+)
+for S in BUILTIN_TYPES, T in BUILTIN_TYPES
+    (S, T) in TWIDDLED_PAIRS && continue
+    @eval @cvt_table $S => $T
+end
+
+for T in BUILTIN_TYPES
     @eval @doc """
         $($T)
 

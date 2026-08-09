@@ -24,6 +24,16 @@ gpu_broadcast(::Type{T}, xs, mode::M;
               overflow = Microfloats.overflow_policy(T)) where {T,M} =
     Array(GPUConvertWithMode{T,M,typeof(overflow)}().(CuArray(xs)))
 
+# Vector constructor with a saturating policy; on sm_89+ the fp8 targets
+# lower to native cvt.rn.satfinite instructions.
+struct GPUVecSAT{V} end
+@inline (::GPUVecSAT{V})(xs) where V = V(xs; overflow=Microfloats.SAT)
+
+# NaN payloads of native conversions are hardware-defined; compare NaN lanes
+# NaN-aware, everything else bit-exact.
+naneq(a, b) = (isnan(a) && isnan(b)) || a === b
+naneq_tuples(xs, ys) = all(map((x, y) -> all(naneq.(Tuple(x), Tuple(y))), xs, ys))
+
 const SCALAR_TARGETS = (
     Float8_E5M2, Float8_E4M3, Float8_E3M4, Float8_E4M3FN, Float8_E8M0FNU,
     Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN,
@@ -97,6 +107,36 @@ svector4(::Type{T}, a, b, c, d) where T =
             @test sametuples(gpu_broadcast(Float6x4_E2M3FN, f32x4), Float6x4_E2M3FN.(f32x4))
             @test sametuples(gpu_broadcast(Float6x4_E3M2FN, f4x4), Float6x4_E3M2FN.(f4x4))
             @test sametuples(gpu_broadcast(Float4x4_E2M1FN, f32x4), Float4x4_E2M1FN.(f32x4))
+        end
+
+        # Saturating policy: exercises the native `.satfinite` overrides on
+        # capable hardware (fp8 on sm_89+, fp6/fp4/ue8m0 on sm_100a) and the
+        # generic fallback elsewhere — device must match host either way.
+        sat_scalar = Float32[0, -0.0, 0.5, 1.5, -2, 447, 448, 449, -1e9,
+                             57344, 6e4, 1e9, Inf, -Inf, NaN]
+        @testset "saturating scalar broadcast" begin
+            for T in (Float8_E4M3FN, Float8_E5M2)
+                got = gpu_broadcast(T, sat_scalar, RoundNearest; overflow=Microfloats.SAT)
+                want = T.(sat_scalar, Ref(RoundNearest); overflow=Microfloats.SAT)
+                @test all(naneq.(got, want))
+            end
+            e8m0_vals = Float32[0.5, 1, 3, 2f0^-127, 1e30, Inf, NaN]
+            got = gpu_broadcast(Float8_E8M0FNU, e8m0_vals, RoundToZero; overflow=Microfloats.SAT)
+            want = Float8_E8M0FNU.(e8m0_vals, Ref(RoundToZero); overflow=Microfloats.SAT)
+            @test all(naneq.(got, want))
+        end
+
+        sat2 = [svector2(Float32, 448f0, 1f9), svector2(Float32, -1f9, 0.5f0),
+                svector2(Float32, NaN32, 2f0), svector2(Float32, 6f4, -6f4)]
+        sat4 = [svector4(Float32, 448f0, 1f9, -1f9, 0.5f0),
+                svector4(Float32, NaN32, 2f0, 6f4, -6f4)]
+        @testset "saturating x2/x4 broadcast" begin
+            for V in (Float8x2_E4M3FN, Float8x2_E5M2)
+                @test naneq_tuples(Array(GPUVecSAT{V}().(CuArray(sat2))), GPUVecSAT{V}().(sat2))
+            end
+            for V in (Float8x4_E4M3FN, Float8x4_E5M2)
+                @test naneq_tuples(Array(GPUVecSAT{V}().(CuArray(sat4))), GPUVecSAT{V}().(sat4))
+            end
         end
     else
         @test_skip "CUDACore.functional() == false"
