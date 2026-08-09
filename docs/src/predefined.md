@@ -19,6 +19,7 @@ These types have no Inf encoding, with alternate or no NaN encodings at all.
 ```@docs
 Float8_E4M3FN
 Float8_E8M0FNU
+Float8_E5M3FNU
 Float6_E3M2FN
 Float6_E2M3FN
 Float4_E2M1FN
