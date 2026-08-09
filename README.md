@@ -30,7 +30,7 @@ Pkg.add("Microfloats")
 
 ## See also
 
-- [FixedPointNumbers.jl](https://github.com/JuliaMath/FixedPointNumbers.jl)
-- [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
-- [DLFP8Types.jl](https://github.com/chengchingwen/DLFP8Types.jl)
 - [MicroFloatingPoints.jl](https://github.com/goualard-f/MicroFloatingPoints.jl)
+- [DLFP8Types.jl](https://github.com/chengchingwen/DLFP8Types.jl)
+- [Float8s.jl](https://github.com/JuliaMath/Float8s.jl)
+- [FixedPointNumbers.jl](https://github.com/JuliaMath/FixedPointNumbers.jl)
