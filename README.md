@@ -7,11 +7,11 @@
 
 Microfloats is a Julia package that implements types and arithmetic (through wider intermediates) for sub-byte floating points, supporting arbitrary combinations of sign, exponent, and significand (mantissa) bits.
 
-Instances of a sub-8 bit floating point type are still one byte wide in memory; Microfloats serves as a base for method dispatch and a reference for arithmetic operations, lending downstream packages like [cuTile.jl](https://github.com/JuliaGPU/cuTile.jl) a useful layer of abstraction.
+In ordinary arrays, or as single instances, sub-8 bit floating points are one byte wide; Microfloats provides a numerical reference for any conceivable microfloat, but also offers canonical types for common narrow data formats which can then be used downstream by packages like [cuTile.jl](https://github.com/JuliaGPU/cuTile.jl).
 
 ## Usage
 
-Define your own primitive type with the macro:
+Define your own microfloat with the macro:
 
 ```julia
 using Microfloats: @microfloat
@@ -19,7 +19,7 @@ using Microfloats: @microfloat
 @microfloat Float8_E5M2 sign=1 exponent=5 significand=2 nonfinite=Microfloats.IEEE
 ```
 
-or see [predefined types](https://murrellgroup.github.io/Microfloats.jl/stable/predefined/) in the documentation.
+or find [predefined types](https://murrellgroup.github.io/Microfloats.jl/stable/predefined/) in the documentation.
 
 ## Installation
 
