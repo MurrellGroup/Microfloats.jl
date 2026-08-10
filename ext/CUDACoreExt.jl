@@ -1,3 +1,5 @@
+module CUDACoreExt
+
 using CUDACore:
     cudaDataType,
     R_8F_E4M3,
@@ -21,3 +23,6 @@ Base.convert(::Type{cudaDataType}, ::Type{Float8_E8M0FNU}) = R_8F_UE8M0
 Base.convert(::Type{cudaDataType}, ::Type{Float6_E2M3FN})  = R_6F_E2M3
 Base.convert(::Type{cudaDataType}, ::Type{Float6_E3M2FN})  = R_6F_E3M2
 Base.convert(::Type{cudaDataType}, ::Type{Float4_E2M1FN})  = R_4F_E2M1
+
+
+end
