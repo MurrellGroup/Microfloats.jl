@@ -1,6 +1,7 @@
 module cuDNNExt
 
 using cuDNN:
+    cuDNN,
     CUDNN_DATA_FP8_E4M3,
     CUDNN_DATA_FP8_E5M2,
     CUDNN_DATA_FP8_E8M0,
