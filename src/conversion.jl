@@ -86,6 +86,24 @@ Microfloats.Saturating()
 overflow_policy(::Type{T}) where T<:Microfloat =
     error("$T must define `Microfloats.overflow_policy(::Type{$T})`")
 
+# ───────────────────────── error hooks ──────────────────────────
+
+# Every error path in the conversion kernels routes through one of these
+# `@noinline` hooks so device backends (e.g. CUDACoreExt) can override just
+# the hooks — via `@device_override` — and run the *same* numeric kernels on
+# device, instead of maintaining a duplicated device-safe copy of the whole
+# conversion body.
+@noinline throw_negative_unsigned(::Type{T}, x) where T =
+    throw(DomainError(x, "negative input to unsigned $T"))
+@noinline throw_no_nan(::Type{T}, x) where T =
+    throw(DomainError(x, "$T has no NaN"))
+@noinline throw_no_overflow_sentinel(::Type{T}, x) where T =
+    throw(DomainError(x, "$T has no overflow sentinel; use overflow=SAT"))
+@noinline throw_unsupported_rounding(::Type{T}, mode) where T =
+    throw(ArgumentError("$T does not support rounding mode $mode"))
+
+# ───────────────────────── rounding shifts ──────────────────────────
+
 function rshift_round_to_even(x::T, n::Int) where T<:Unsigned
     n <= 0 && return x >> n
     n > 8 * sizeof(T) && return zero(T)
@@ -129,12 +147,12 @@ clamp_inf(x::T) where T<:Microfloat = signbit(x) ? -inf(T) : inf(T)
 
 function apply_overflow_policy(x::T, xf::Float32, mode::RoundingMode, ::Overflowing) where T<:Microfloat
     if isnan(xf)
-        return hasnan(T) ? nan(T) : throw(DomainError(xf, "$T has no NaN"))
+        return hasnan(T) ? nan(T) : throw_no_nan(T, xf)
     elseif isinf(xf) || is_outside_floatmax(xf, T)
         if mode_overflows_to_inf(mode, signbit(xf))
             return hasinf(T) ? clamp_inf(x) :
                    hasnan(T) ? nan(T) :
-                   throw(DomainError(xf, "$T has no overflow sentinel; use overflow=SAT"))
+                   throw_no_overflow_sentinel(T, xf)
         else
             return clamp_floatmax(x)
         end
@@ -145,7 +163,7 @@ end
 
 function apply_overflow_policy(x::T, xf::Float32, ::RoundingMode, ::Saturating) where T<:Microfloat
     if isnan(xf)
-        return hasnan(T) ? nan(T) : throw(DomainError(xf, "$T has no NaN"))
+        return hasnan(T) ? nan(T) : throw_no_nan(T, xf)
     elseif isinf(xf) || is_outside_floatmax(xf, T)
         return clamp_floatmax(x)
     else
@@ -158,7 +176,7 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
                               mode::RoundingMode, policy::OverflowPolicy
                               ) where {T<:Microfloat, F}
     if sign_bits(T) == 0 && signbit(x)
-        throw(DomainError(x, "negative input to unsigned $T"))
+        throw_negative_unsigned(T, x)
     end
     iszero(x) && return signbit(x) ? -zero(T) : zero(T)
 
@@ -208,44 +226,83 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
     return apply_overflow_policy(reinterpret(T, t_raw), x, mode, policy)
 end
 
-(::Type{T})(x::Float32, mode::RoundingMode{:Nearest};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    _round_to_microfloat(T, x, rshift_round_to_even, mode, overflow)
-(::Type{T})(x::Float32, mode::RoundingMode{:NearestTiesAway};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    _round_to_microfloat(T, x, rshift_round_ties_away, mode, overflow)
-(::Type{T})(x::Float32, mode::RoundingMode{:ToZero};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    _round_to_microfloat(T, x, rshift_truncate, mode, overflow)
-(::Type{T})(x::Float32, mode::RoundingMode{:FromZero};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow)
+# ───────────────────────── conversion funnel ──────────────────────────
+
+"""
+    cvt(::Type{T}, x, mode::RoundingMode, policy::OverflowPolicy) -> T
+
+Central conversion funnel. Every scalar conversion into a
+[`Microfloat`](@ref) — constructors, `convert`, broadcasts, and the packed
+vector paths — reduces to a call of this function, with the rounding mode
+and overflow policy as positional, dispatchable arguments.
+
+`cvt` is the extension surface for optimized conversions. To specialize,
+add a method on any subset of `(T, typeof(x), mode, policy)`:
+
+- **Bit-twiddling / table specializations** add ordinary methods, e.g.
+  `Microfloats.cvt(::Type{Float8_E4M3}, x::Float4_E2M1FN, ::RoundingMode,
+  ::OverflowPolicy)`. See [`@cvt_table`](@ref) for a generated lookup-table
+  shortcut.
+- **Device backends** (package extensions) use overlay method tables (e.g.
+  `CUDACore.@device_override`) on exactly the `(T, source, mode, policy)`
+  signatures the hardware supports natively; every other combination falls
+  through to the portable methods below.
+
+The always-correct reference path is [`cvt_generic`](@ref); specialized
+methods that need a partial fallback should call it (not `cvt`, which on
+overlay method tables would recurse into the override itself).
+"""
+@inline cvt(::Type{T}, x::Real, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt(T, Float32(x), mode, policy)
+@inline cvt(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt_generic(T, x, mode, policy)
+@inline cvt(::Type{T}, x::Microfloat, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt_generic(T, Float32(x), mode, policy)
+
+"""
+    cvt_generic(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) -> T
+
+The generic reference implementation behind [`cvt`](@ref): bit-level
+rounding from `Float32` into any `Microfloat` layout, for every supported
+rounding mode and overflow policy. Specialized `cvt` methods (and device
+overrides) call this directly when their fast path does not apply.
+"""
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:Nearest}, policy::OverflowPolicy) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_to_even, mode, policy)
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:NearestTiesAway}, policy::OverflowPolicy) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_ties_away, mode, policy)
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:ToZero}, policy::OverflowPolicy) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_truncate, mode, policy)
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:FromZero}, policy::OverflowPolicy) where T<:Microfloat =
+    _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, policy)
 
 # RoundUp/RoundDown are sign-dependent: "toward +∞" rounds the magnitude up
 # for positive inputs but truncates the magnitude for negative inputs (which
 # moves the value toward zero, i.e., closer to +∞). RoundDown is the mirror.
-(::Type{T})(x::Float32, mode::RoundingMode{:Up};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    signbit(x) ? _round_to_microfloat(T, x, rshift_truncate,           mode, overflow) :
-                 _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow)
-(::Type{T})(x::Float32, mode::RoundingMode{:Down};
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    signbit(x) ? _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, overflow) :
-                 _round_to_microfloat(T, x, rshift_truncate,           mode, overflow)
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:Up}, policy::OverflowPolicy) where T<:Microfloat =
+    signbit(x) ? _round_to_microfloat(T, x, rshift_truncate,           mode, policy) :
+                 _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, policy)
+@inline cvt_generic(::Type{T}, x::Float32, mode::RoundingMode{:Down}, policy::OverflowPolicy) where T<:Microfloat =
+    signbit(x) ? _round_to_microfloat(T, x, rshift_round_up_magnitude, mode, policy) :
+                 _round_to_microfloat(T, x, rshift_truncate,           mode, policy)
 
-# Errors on unsupported modes instead of recursing through the Real-level fallback below.
-(::Type{T})(x::Float32, mode::RoundingMode;
-            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    throw(ArgumentError("$T does not support rounding mode $mode"))
+cvt_generic(::Type{T}, x::Float32, mode::RoundingMode, ::OverflowPolicy) where T<:Microfloat =
+    throw_unsupported_rounding(T, mode)
 
+# ───────────────────────── constructors ──────────────────────────
+
+# Constructors are thin sugar over `cvt`: they only resolve defaults
+# (RoundNearest, the type's registered overflow policy) and are never
+# specialized or device-overridden themselves.
+#
 # `Real` (not `Number`) avoids colliding with Base's
 # `(::Type{T})(::Real, ::RoundingMode) where T<:AbstractFloat`.
 (::Type{T})(x::Real;
             overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    T(x, RoundNearest; overflow=overflow)
+    cvt(T, x, RoundNearest, overflow)
 (::Type{T})(x::Real, mode::RoundingMode;
             overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
-    T(Float32(x), mode; overflow=overflow)
+    cvt(T, x, mode, overflow)
 
 # Returns the BFloat16 encoding as raw UInt16 bits. Internal plumbing stays
 # in bits because on Julia >= 1.12 a BFloat16 *value* crossing a function-call
@@ -303,8 +360,7 @@ function _to_bfloat16_bits(x::T) where {T<:Microfloat}
             return bf16_sign_bit | UInt16(sub_q & 0x7f)
         end
     else
-        bf16_raw_out = bf16_sign_bit | (UInt16(bf16_exponent_field & 0xff) << 7) | UInt16((bf16_significand_total - 0x80) & 0x7f)
-        return bf16_raw_out
+        return bf16_sign_bit | (UInt16(bf16_exponent_field & 0xff) << 7) | UInt16((bf16_significand_total - 0x80) & 0x7f)
     end
 end
 
@@ -363,6 +419,76 @@ function decimal_string end
 BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
 (::Type{T})(x::Microfloat) where T<:Number =
     T(reinterpret(Float32, UInt32(to_bfloat16_bits(x)) << 16))
-# Microfloat → Microfloat: route through Float32 (matches the Real-input path
-# and avoids the BFloat16 intermediate's narrower exponent dynamic range).
-(::Type{T})(x::Microfloat) where T<:Microfloat = T(Float32(x))
+# Microfloat → Microfloat: disambiguates the two methods above; the default
+# `cvt` route goes through Float32 (matching the Real-input path and avoiding
+# the BFloat16 intermediate's narrower exponent dynamic range) unless a
+# specialized `cvt` method — e.g. one registered by `@cvt_table` — applies.
+(::Type{T})(x::Microfloat;
+            overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
+    cvt(T, x, RoundNearest, overflow)
+
+# ───────────────────────── @cvt_table ──────────────────────────
+
+# Generator backend for `@cvt_table`: builds the complete raw-bits lookup
+# table for one (Dst, Src, mode, policy) combination by running every
+# possible source bit pattern through `cvt_generic`, so the table is correct
+# by construction. If any entry throws (e.g. negative source values into an
+# unsigned target), the whole combination falls back to the runtime generic
+# path so error behavior is preserved exactly.
+function table_cvt_expr(::Type{T}, ::Type{S}, ::Type{M}, ::Type{P}
+                        ) where {T<:Microfloat, S<:Microfloat, M<:RoundingMode, P<:OverflowPolicy}
+    mode, policy = M.instance, P.instance
+    n = 1 << bitwidth(S)
+    vals = UInt8[]
+    for raw in UInt8(0):UInt8(n - 1)
+        y = try
+            cvt_generic(T, Float32(reinterpret(S, raw)), mode, policy)
+        catch
+            return :($cvt_generic($T, Float32(x), mode, policy))
+        end
+        push!(vals, reinterpret(UInt8, y))
+    end
+    table = Tuple(vals)
+    mask = UInt8(n - 1)
+    return :(reinterpret($T, $table[Int(reinterpret(UInt8, x) & $mask) + 1]))
+end
+
+"""
+    @cvt_table Src => Dst
+
+Register an optimized lookup-table method on the conversion funnel
+[`cvt`](@ref) for converting microfloat `Src` values to microfloat `Dst`.
+
+Expands to a `@generated` method of `Microfloats.cvt` whose lookup table is
+computed lazily — once per `(mode, policy)` combination actually used — by
+running every `Src` bit pattern through [`cvt_generic`](@ref), so results
+are identical to the generic path but cost a single `2^bitwidth(Src)`-entry
+table lookup. Combinations where the generic path throws (e.g. signed
+source into unsigned target) keep the runtime path and its errors.
+
+Invoke *after* both types are defined. Microfloats registers tables for all
+pairs of built-in types; user-defined `@microfloat` types can opt in:
+
+```julia
+@microfloat MyFloat6 exponent=3 significand=2
+Microfloats.@cvt_table MyFloat6 => Float8_E4M3
+Microfloats.@cvt_table Float8_E4M3 => MyFloat6
+```
+
+To hand-optimize a pair instead (e.g. branch-free bit-twiddling), define
+the `Microfloats.cvt` method for it directly rather than invoking
+`@cvt_table` for that pair.
+"""
+macro cvt_table(pair)
+    (pair isa Expr && pair.head === :call && pair.args[1] === :(=>)) ||
+        throw(ArgumentError("@cvt_table expects `Src => Dst`, got `$pair`"))
+    S, T = pair.args[2], pair.args[3]
+    ex = quote
+        Base.@generated function $(@__MODULE__).cvt(::Type{$T}, x::$S,
+                                                    mode::$RoundingMode, policy::$OverflowPolicy)
+            $table_cvt_expr($T, $S, mode, policy)
+        end
+        nothing
+    end
+    return esc(ex)
+end
