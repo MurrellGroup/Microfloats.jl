@@ -26,7 +26,7 @@ export @microfloat
 
 include("variants.jl")
 export Float8_E5M2, Float8_E4M3, Float8_E3M4
-export Float8_E4M3FN, Float8_E8M0FNU
+export Float8_E4M3FN, Float8_E8M0FNU, Float8_E5M3FNU
 export Float6_E2M3FN, Float6_E3M2FN
 export Float4_E2M1FN
 
