@@ -1,21 +1,17 @@
 module cuDNNExt
 
-using cuDNN:
-    cuDNN,
-    CUDNN_DATA_FP8_E4M3,
-    CUDNN_DATA_FP8_E5M2,
-    CUDNN_DATA_FP8_E8M0,
-    CUDNN_DATA_FP4_E2M1
+import Microfloats
+import cuDNN
 
-using Microfloats:
-    Float8_E4M3FN,
-    Float8_E5M2,
-    Float8_E8M0FNU,
-    Float4_E2M1FN
-
-cuDNN.cudnnDataType(::Type{Float8_E4M3FN}) = CUDNN_DATA_FP8_E4M3
-cuDNN.cudnnDataType(::Type{Float8_E5M2}) = CUDNN_DATA_FP8_E5M2
-cuDNN.cudnnDataType(::Type{Float8_E8M0FNU}) = CUDNN_DATA_FP8_E8M0
-cuDNN.cudnnDataType(::Type{Float4_E2M1FN}) = CUDNN_DATA_FP4_E2M1
+for (name, cudnn_name) in (
+    :Float8_E4M3FN  => :CUDNN_DATA_FP8_E4M3,
+    :Float8_E5M2    => :CUDNN_DATA_FP8_E5M2,
+    :Float8_E8M0FNU => :CUDNN_DATA_FP8_E8M0,
+    :Float4_E2M1FN  => :CUDNN_DATA_FP4_E2M1,
+)
+    if isdefined(cuDNN, cudnn_name)
+        @eval cuDNN.cudnnDataType(::Type{Microfloats.$name}) = cuDNN.$cudnn_name
+    end
+end
 
 end
