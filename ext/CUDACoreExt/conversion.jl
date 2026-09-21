@@ -20,8 +20,8 @@
 #   2. narrow `cvt` signatures for exactly the combinations that have a native
 #      PTX conversion instruction, each gated on what the compile target
 #      offers. The gates fold at kernel compile time because
-#      `compute_capability()`, `target_feature_set()` and `ptx_isa_version()`
-#      are compile-time constants under GPUCompiler, so each kernel compiles
+#      `compute_capability()`, the target's feature set and
+#      `ptx_isa_version()` are compile-time constants under GPUCompiler, so each kernel compiles
 #      to either the native instruction or the generic path, with no runtime
 #      branch.
 #
@@ -44,8 +44,7 @@ using Microfloats: Microfloat, cvt, cvt_generic, cvt_lanes,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
                    Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN
 using StaticArrays: SVector
-using CUDACore: CUDACore, @device_override,
-                compute_capability, target_feature_set, ptx_isa_version
+using CUDACore: CUDACore, @device_override, compute_capability, ptx_isa_version
 
 # ───────────────────────── error hooks ──────────────────────────
 
@@ -75,8 +74,15 @@ end
 @inline has_fp8() = at_least(compute_capability(), 8, 9)
 # fp6, fp4 and ue8m0 with Float32 operands, and their Float16 widening: the
 # arch- and family-specific sm_100+ targets, never a baseline target.
-@inline has_mxfp() = at_least(compute_capability(), 10, 0) &&
-                     target_feature_set() !== :baseline
+@inline has_mxfp() = at_least(compute_capability(), 10, 0) && !baseline_target()
+
+# `target_feature_set()` returns a Symbol, and a comparison of symbols does
+# not always fold in device code: the kernel then keeps both the native and
+# the generic path behind a runtime branch. The integer it is derived from
+# always folds.
+const BASELINE_FEATURES = UInt32(isdefined(CUDACore, :BaselineFeatures) ?
+    CUDACore.BaselineFeatures : CUDACore.GPUCompiler.BaselineFeatures)
+@inline baseline_target() = CUDACore.sm_features() == BASELINE_FEATURES
 # Float16 and BFloat16 operands for the remaining narrowing forms (PTX 9.1)
 # and BFloat16 widening (PTX 9.2), on the same targets.
 @inline has_mxfp_half() = has_mxfp() && has_ptx(Val(9), Val(1))
