@@ -260,7 +260,14 @@ svector4(::Type{T}, a, b, c, d) where T =
             # The sweeps pass on the generic path too, so check separately
             # that each form really lowers to its instruction.
             @testset "instruction selection" begin
-                selected(f, X, instr) = occursin(instr, device_asm(f, X, arch))
+                # The generic path must also be gone. A gate that does not fold
+                # leaves both paths behind a runtime branch: symbol comparisons,
+                # the lanewise fallback or the widening lookup table survive.
+                function selected(f, X, instr)
+                    asm = device_asm(f, X, arch)
+                    occursin(instr, asm) && !occursin("jl_sym", asm) &&
+                        !occursin("cvt_lanes", asm) && !occursin("_j_const", asm)
+                end
                 sat(V) = NativeCvt{V,typeof(RoundNearest)}()
                 V2(T) = Microfloats.SVector{2,T}
                 D2(T) = Microfloats.NVector{T,2}                              # packed destination
