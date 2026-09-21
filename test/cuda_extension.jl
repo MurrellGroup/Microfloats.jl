@@ -21,6 +21,28 @@ gpu_broadcast(::Type{T}, xs) where T = Array(T.(CuArray(xs)))
 struct NativeCvt{V,M} end
 @inline (::NativeCvt{V,M})(x) where {V,M} = cvt(V, x, M(), Microfloats.SAT)
 
+# The widening funnel as an isbits callable.
+struct NativeWiden{V} end
+@inline (::NativeWiden{V})(x) where V = cvt(V, x)
+
+# PTX assembly of a one-element kernel applying `f`, to check which
+# instructions a conversion lowers to.
+function asm_kernel!(out, xs, f)
+    @inbounds out[1] = f(xs[1])
+    nothing
+end
+function device_asm(f, ::Type{X}, arch) where X
+    device_type(T) = typeof(CUDACore.cudaconvert(CuArray{T}(undef, 1)))
+    Y = Core.Compiler.return_type(f, Tuple{X})
+    config = CUDACore.compiler_config(CUDACore.device(); kernel=true, arch=arch)
+    GPUCompiler = CUDACore.GPUCompiler
+    mi = GPUCompiler.methodinstance(typeof(asm_kernel!), Tuple{device_type(Y),device_type(X),typeof(f)})
+    GPUCompiler.JuliaContext() do _
+        GPUCompiler.compile(:asm, GPUCompiler.CompilerJob(mi, config))[1]
+    end
+end
+ptxas_has(v) = any(>=(v), CUDACore.ptxas_compat().ptx)
+
 function native_kernel!(out, xs, f)
     i = (CUDACore.blockIdx().x - Int32(1)) * CUDACore.blockDim().x + CUDACore.threadIdx().x
     if i <= length(xs)
@@ -48,7 +70,7 @@ naneq(a, b) = (isnan(a) && isnan(b)) || a === b
 naneq_tuples(xs, ys) = all(map((x, y) -> all(naneq.(Tuple(x), Tuple(y))), xs, ys))
 
 const SCALAR_TARGETS = (
-    Float8_E5M2, Float8_E4M3, Float8_E3M4, Float8_E4M3FN, Float8_E8M0FNU,
+    Float8_E5M2, Float8_E4M3, Float8_E3M4, Float8_E4M3FN, Float8_E8M0FNU, Float8_E5M3FNU,
     Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN,
 )
 
@@ -160,54 +182,107 @@ svector4(::Type{T}, a, b, c, d) where T =
             end
         end
 
-        # The fp6/fp4/ue8m0 instructions exist only on arch-specific targets, so
-        # a default (baseline) compile never reaches them. Compile explicitly for
-        # the device's `a` target and compare every lane with the host funnel.
+        # Native conversions against the host funnel, compiled explicitly for the
+        # device's arch- and family-specific targets (a baseline target has
+        # only the fp8 forms). The lane sweeps cover every representable
+        # value, every tie between neighbours, their float neighbours and the
+        # saturating range, from Float32, Float16 and BFloat16 sources; the
+        # widening sweeps cover every bit pattern.
         cap = CUDACore.capability(CUDACore.device())
-        if cap >= v"10.0"
-            @testset "native conversions on sm_$(cap.major)$(cap.minor)a" begin
-                arch = CUDACore.SMVersion(cap.major, cap.minor, :arch)
-                native(f, xs) = begin
-                    ys = CuArray(xs)
-                    out = similar(ys, Core.Compiler.return_type(f, Tuple{eltype(xs)}))
-                    kernel = @cuda launch=false arch=arch native_kernel!(out, ys, f)
-                    kernel(out, ys, f; threads=256, blocks=cld(length(xs), 256))
-                    Array(out)
-                end
-                bits(x) = reinterpret(UInt8, [x...])
+        feature_sets = cap >= v"10.0" ? (:arch, :family) : (:baseline,)
+        @testset "native conversions on $(CUDACore.SMVersion(cap.major, cap.minor, fs))" for fs in feature_sets
+            arch = CUDACore.SMVersion(cap.major, cap.minor, fs)
+            mxfp = fs !== :baseline
+            function native(f, xs)
+                ys = CuArray(xs)
+                out = similar(ys, Core.Compiler.return_type(f, Tuple{eltype(xs)}))
+                kernel = @cuda launch=false arch=arch native_kernel!(out, ys, f)
+                kernel(out, ys, f; threads=256, blocks=cld(length(xs), 256))
+                Array(out)
+            end
+            same(a, b) = all(naneq.(Tuple(a), Tuple(b)))
+            agree(got, want) = all(map(same, got, want))
 
-                # Every representable value, the midpoints between neighbours
-                # (ties), their float neighbours, and out-of-range magnitudes.
-                function probes(::Type{T}) where T
-                    vals = sort!(unique!(filter(isfinite, Float32.(reinterpret.(T, 0x00:UInt8(2^bitwidth(T) - 1))))))
-                    mids = (vals[1:end-1] .+ vals[2:end]) ./ 2
-                    edge = Float32[floatmax(T) * 1.01f0, floatmax(T) * 4, 1f30, Inf32, -0.0f0]
-                    xs = vcat(vals, mids, nextfloat.(mids), prevfloat.(mids), edge, -edge)
-                    T === Float8_E8M0FNU ? filter(x -> !signbit(x), xs) : xs
-                end
+            # Every representable value, the midpoints between neighbours
+            # (ties), their float neighbours, and out-of-range magnitudes.
+            function probes(::Type{T}, ::Type{S}) where {T,S}
+                vals = sort!(unique!(filter(isfinite, Float32.(reinterpret.(T, 0x00:UInt8(2^bitwidth(T) - 1))))))
+                mids = S.((vals[1:end-1] .+ vals[2:end]) ./ 2)
+                # (including Float32 subnormals, below even E8M0's 2^-127)
+                edge = S.(Float32[Float32(floatmax(T)) * 1.01f0, Float32(floatmax(T)) * 4, 1f30, Inf32, -0.0f0,
+                                  2f0^-130, 3 * 2f0^-129, nextfloat(0f0)])
+                xs = vcat(S.(vals), mids, nextfloat.(mids), prevfloat.(mids), edge, -edge)
+                Microfloats.hasnan(T) && push!(xs, S(NaN))
+                Microfloats.sign_bits(T) == 0 ? filter(x -> !signbit(x), xs) : xs
+            end
 
-                for (T, mode) in ((Float6_E2M3FN, RoundNearest), (Float6_E3M2FN, RoundNearest),
-                                  (Float4_E2M1FN, RoundNearest), (Float8_E8M0FNU, RoundToZero))
-                    xs = probes(T)
-                    ys = reverse(xs)
-                    pairs = [(a, b) for (a, b) in zip(xs, ys)]
-                    quads = [(a, b, b, a) for (a, b) in zip(xs, ys)]
-                    V2 = T === Float4_E2M1FN || T === Float8_E8M0FNU ? Microfloats.NVector{T,2} : Microfloats.SVector{2,T}
-                    V4 = T === Float4_E2M1FN || T === Float8_E8M0FNU ? Microfloats.NVector{T,4} : Microfloats.SVector{4,T}
-                    M = typeof(mode)
-                    host(V, ps) = map(NativeCvt{V,M}(), ps)
-                    # UE8M0 kernels do not compile on the device yet: the module
-                    # keeps unused Julia string-runtime lookups, the same failure
-                    # as the UE8M0 broadcasts above.
-                    agree(f) = T === Float8_E8M0FNU ? (@test_broken f()) : (@test f())
-                    agree(() -> bits(native(NativeCvt{T,M}(), xs)) == bits(host(T, xs)))
-                    agree(() -> native(NativeCvt{V2,M}(), pairs) == host(V2, pairs))
-                    agree(() -> native(NativeCvt{V4,M}(), quads) == host(V4, quads))
-                    if V2 <: Microfloats.SVector
-                        # dense destinations: native unpacked result, then packed
-                        N2, N4 = Microfloats.NVector{T,2}, Microfloats.NVector{T,4}
-                        @test native(NativeCvt{N2,M}(), pairs) == host(N2, pairs)
-                        @test native(NativeCvt{N4,M}(), quads) == host(N4, quads)
+            narrowing = (
+                (Float8_E4M3FN,  (RoundNearest,),            (Float32, Float16, Microfloats.BFloat16), true),
+                (Float8_E5M2,    (RoundNearest,),            (Float32, Float16, Microfloats.BFloat16), true),
+                (Float6_E2M3FN,  (RoundNearest,),            (Float32, Float16, Microfloats.BFloat16), mxfp),
+                (Float6_E3M2FN,  (RoundNearest,),            (Float32, Float16, Microfloats.BFloat16), mxfp),
+                (Float4_E2M1FN,  (RoundNearest,),            (Float32, Float16, Microfloats.BFloat16), mxfp),
+                (Float8_E8M0FNU, (RoundToZero, RoundUp),     (Float32, Microfloats.BFloat16),          mxfp),
+            )
+            for (T, modes, sources, _) in narrowing, mode in modes, S in sources
+                xs = probes(T, S)
+                ys = reverse(xs)
+                pairs = collect(zip(xs, ys))
+                quads = [(a, b, b, a) for (a, b) in pairs]
+                M = typeof(mode)
+                for (V, inputs) in ((T, xs),
+                                    (Microfloats.SVector{2,T}, pairs), (Microfloats.SVector{4,T}, quads),
+                                    (Microfloats.NVector{T,2}, pairs), (Microfloats.NVector{T,4}, quads))
+                    f = NativeCvt{V,M}()
+                    @test agree(native(f, inputs), map(f, inputs))
+                end
+            end
+
+            widening = (
+                (Float8_E4M3FN,  (Float16, Microfloats.BFloat16, Float32)),
+                (Float8_E5M2,    (Float16, Microfloats.BFloat16, Float32)),
+                (Float6_E2M3FN,  (Float16, Microfloats.BFloat16, Float32)),
+                (Float6_E3M2FN,  (Float16, Microfloats.BFloat16, Float32)),
+                (Float4_E2M1FN,  (Float16, Microfloats.BFloat16, Float32)),
+                (Float8_E8M0FNU, (Microfloats.BFloat16, Float32)),
+            )
+            for (T, destinations) in widening, F in destinations
+                xs = reinterpret.(T, 0x00:UInt8(2^bitwidth(T) - 1))
+                ys = reverse(xs)
+                quads = [Microfloats.SVector{4,T}(a, b, b, a) for (a, b) in zip(xs, ys)]
+                packed = [Microfloats.NVector{T,2}((a, b)) for (a, b) in zip(xs, ys)]
+                for (V, inputs) in ((F, xs), (Microfloats.SVector{4,F}, quads), (Microfloats.SVector{2,F}, packed))
+                    f = NativeWiden{V}()
+                    @test agree(native(f, inputs), map(f, inputs))
+                end
+            end
+
+            # The sweeps pass on the generic path too, so check separately
+            # that each form really lowers to its instruction.
+            @testset "instruction selection" begin
+                selected(f, X, instr) = occursin(instr, device_asm(f, X, arch))
+                sat(V) = NativeCvt{V,typeof(RoundNearest)}()
+                V2(T) = Microfloats.SVector{2,T}
+                D2(T) = Microfloats.NVector{T,2}                              # packed destination
+                P2(T) = typeof(Microfloats.NVector{T,2}((one(T), one(T))))    # packed source, concrete
+                @test selected(sat(V2(Float8_E4M3FN)), NTuple{2,Float32}, "cvt.rn.satfinite.e4m3x2.f32")
+                @test selected(sat(V2(Float8_E5M2)), NTuple{2,Float16}, "cvt.rn.satfinite.e5m2x2.f16x2")
+                @test selected(NativeWiden{V2(Float16)}(), P2(Float8_E4M3FN), "cvt.rn.f16x2.e4m3x2")
+                if mxfp
+                    @test selected(sat(V2(Float6_E2M3FN)), NTuple{2,Float32}, "cvt.rn.satfinite.e2m3x2.f32")
+                    @test selected(sat(D2(Float6_E3M2FN)), NTuple{2,Float32}, "cvt.rn.satfinite.e3m2x2.f32")
+                    @test selected(sat(D2(Float4_E2M1FN)), NTuple{2,Float32}, "cvt.rn.satfinite.e2m1x2.f32")
+                    @test selected(NativeCvt{V2(Float8_E8M0FNU),typeof(RoundUp)}(), NTuple{2,Float32},
+                                   "cvt.rp.satfinite.ue8m0x2.f32")
+                    @test selected(NativeWiden{V2(Float16)}(), P2(Float4_E2M1FN), "cvt.rn.f16x2.e2m1x2")
+                    @test selected(NativeWiden{V2(Microfloats.BFloat16)}(), P2(Float8_E8M0FNU), "cvt.rn.bf16x2.ue8m0x2")
+                    if ptxas_has(v"9.1")
+                        @test selected(sat(D2(Float4_E2M1FN)), NTuple{2,Microfloats.BFloat16},
+                                       "cvt.rn.satfinite.e2m1x2.bf16x2")
+                    end
+                    if ptxas_has(v"9.2")
+                        @test selected(NativeWiden{V2(Microfloats.BFloat16)}(), P2(Float4_E2M1FN), "cvt.rn.bf16x2.e2m1x2")
+                        @test selected(NativeWiden{V2(Float32)}(), V2(Float8_E4M3FN), "cvt.rn.bf16x2.e4m3x2")
                     end
                 end
             end
