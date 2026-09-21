@@ -73,11 +73,11 @@ cover the requested combination.
 Vector forms of the conversion funnel: convert `N` source lanes in one call,
 into one byte per lane (`SVector`) or densely packed (`BitPacking.NVector`).
 The `SVector` default is lanewise ([`cvt_lanes`](@ref)); the `NVector`
-default converts through the `SVector` form and packs. Specialize the
-`SVector` form for multi-lane hardware conversions whose result has one lane
-per byte (e.g. PTX fp8/fp6 `cvt` x2 instructions in device overlays), and
-the `NVector` form for conversions that produce or consume dense storage
-directly (fp4 pairs, SIMD bit-twiddling over packed sources).
+default converts through the `SVector` form and packs. Packing is layout
+only and folds away, so specialize the `SVector` form for multi-lane hardware
+conversions (e.g. PTX `cvt` x2 instructions in device overlays): that serves
+both destinations. Specialize the `NVector` form only for conversions that
+work on dense storage directly, such as bit-twiddling over packed sources.
 
 Source containers (`SVector`, `NVector`, any `StaticArray` vector) normalize
 to `NTuple` first; packed→packed specializations may intercept the
@@ -119,3 +119,35 @@ end
     cvt(SVector{N,T}, xs, RoundNearest, overflow)
 (::Type{SVector{N,T}})(xs::NVector{T,N}) where {T<:Microfloat,N} =
     SVector{N,T}(Tuple(xs))
+
+# ───────────────────────── vector widening funnel ──────────────────────────
+
+"""
+    cvt(::Type{SVector{N,F}}, xs::NTuple{N,T}) -> SVector{N,F}
+
+Vector form of the widening funnel: `N` lanes of microfloat `T` to `N` wide
+lanes (`F` is `Float16`, `BFloat16`, `Float32` or `Float64`). Packed
+(`NVector`) and unpacked (`SVector`) sources normalize to a tuple of lanes;
+the default is lanewise through the scalar widening funnel. Specialize it for
+multi-lane hardware conversions, e.g. PTX `cvt.rn.bf16x2.e4m3x2` in device
+overlays. Packing and unpacking a source is layout only and folds away, so a
+specialization on the tuple form serves every source container.
+"""
+@inline cvt(::Type{SVector{N,F}}, xs::NTuple{N,T}) where {N,F<:WideFloat,T<:Microfloat} =
+    cvt_lanes(SVector{N,F}, xs)
+@inline cvt_lanes(::Type{SVector{N,F}}, xs::NTuple{N,T}) where {N,F<:WideFloat,T<:Microfloat} =
+    SVector{N,F}(ntuple(i -> cvt(F, xs[i]), Val(N)))
+@inline cvt(::Type{SVector{N,F}}, xs::StaticArray{Tuple{N},T,1}) where {N,F<:WideFloat,T<:Microfloat} =
+    cvt(SVector{N,F}, Tuple(xs))
+
+# Entry points. One method per destination eltype, like the scalar
+# constructors, so they stay more specific than the generic StaticArrays and
+# BitPacking constructors in both arguments.
+for F in (Float16, BFloat16, Float32, Float64)
+    @eval begin
+        (::Type{SVector{N,$F}})(xs::SVector{N,T}) where {N,T<:Microfloat} =
+            cvt(SVector{N,$F}, xs)
+        (::Type{SVector{N,$F}})(xs::NVector{T,N}) where {N,T<:Microfloat} =
+            cvt(SVector{N,$F}, xs)
+    end
+end

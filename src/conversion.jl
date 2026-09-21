@@ -95,6 +95,8 @@ overflow_policy(::Type{T}) where T<:Microfloat =
 # conversion body.
 @noinline throw_negative_unsigned(::Type{T}, x) where T =
     throw(DomainError(x, "negative input to unsigned $T"))
+@noinline throw_negate_unsigned(::Type{T}, x) where T =
+    throw(DomainError(x, "cannot negate unsigned $T"))
 @noinline throw_no_nan(::Type{T}, x) where T =
     throw(DomainError(x, "$T has no NaN"))
 @noinline throw_no_overflow_sentinel(::Type{T}, x) where T =
@@ -178,17 +180,27 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
     if sign_bits(T) == 0 && signbit(x)
         throw_negative_unsigned(T, x)
     end
-    iszero(x) && return signbit(x) ? -zero(T) : zero(T)
+    # A signed zero keeps its sign; unsigned formats have an empty sign mask.
+    iszero(x) && return reinterpret(T, signbit(x) ? sign_mask(T) : 0x00)
 
     f32_raw  = reinterpret(UInt32, x)
     f32_exp  = Int((f32_raw >> 23) & UInt32(0x000000ff))
     f32_frac = f32_raw & UInt32(0x007fffff)
 
-    sig24 = f32_exp == 0 ? f32_frac : (UInt32(0x00800000) | f32_frac)
-    true_exp = f32_exp == 0 ? -126 : (f32_exp - 127)
+    # A subnormal Float32 is normalized first, so `sig24` always carries its
+    # leading one in bit 23. Only formats that reach below Float32's normal
+    # range (E8M0's 2^-127) can tell the difference.
+    nlz = f32_exp == 0 ? leading_zeros(f32_frac) - 8 : 0
+    sig24 = f32_exp == 0 ? f32_frac << nlz : (UInt32(0x00800000) | f32_frac)
+    true_exp = f32_exp == 0 ? -126 - nlz : (f32_exp - 127)
     t_exp = true_exp + exponent_bias(T)
 
-    if t_exp <= 0
+    if significand_bits(T) == 0 && t_exp < 0
+        # Without significand bits there are no subnormals and no zero: the
+        # all-zero exponent is the smallest value, and everything below it
+        # rounds or saturates to it.
+        t_raw = 0x00
+    elseif t_exp <= 0 && significand_bits(T) > 0
         # Subnormal path in target format
         shift = t_exp + significand_bits(T) - 24
         sub_q = rshift(sig24, -shift)
@@ -303,6 +315,11 @@ cvt_generic(::Type{T}, x::Float32, mode::RoundingMode, ::OverflowPolicy) where T
 (::Type{T})(x::Real, mode::RoundingMode;
             overflow::OverflowPolicy = overflow_policy(T)) where T<:Microfloat =
     cvt(T, x, mode, overflow)
+# `Rational` sources: otherwise ambiguous with Base's
+# `(::Type{T})(::Rational) where T<:AbstractFloat`.
+(::Type{T})(x::Rational{S};
+            overflow::OverflowPolicy = overflow_policy(T)) where {S,T<:Microfloat} =
+    cvt(T, x, RoundNearest, overflow)
 
 # Returns the BFloat16 encoding as raw UInt16 bits. Internal plumbing stays
 # in bits because on Julia >= 1.12 a BFloat16 *value* crossing a function-call
@@ -409,17 +426,64 @@ end
 # `@microfloat` adds a new method to `decimal_string`
 function decimal_string end
 
-# Every Microfloat is exactly representable in BFloat16 (M ≤ 7, E ≤ 8), so
-# widening through the BFloat16 *encoding* is lossless. The widening shifts
-# the raw bits into a Float32 directly instead of materializing a BFloat16:
-# on Julia >= 1.12, a BFloat16 value crossing a function-call boundary has
-# subnormals flushed to zero on CPUs with native BF16 instructions (e.g.
-# Zen 4), which corrupts E8M0's 2^-127. Base then supplies `T(::Float32)`
-# for the standard numeric types (Float16/64, Int*, BigFloat).
-BFloat16(x::T) where T<:Microfloat = to_bfloat16(x)
-(::Type{T})(x::Microfloat) where T<:Number =
-    T(reinterpret(Float32, UInt32(to_bfloat16_bits(x)) << 16))
-# Microfloat → Microfloat: disambiguates the two methods above; the default
+# ───────────────────────── widening funnel ──────────────────────────
+
+"""
+    WideFloat
+
+The floating-point destinations of the widening funnel: `Float16`,
+`BFloat16`, `Float32` and `Float64`.
+"""
+const WideFloat = Union{Float16,BFloat16,Float32,Float64}
+
+"""
+    cvt(::Type{F}, x::Microfloat) -> F
+
+Widening half of the conversion funnel: every conversion *out of* a
+[`Microfloat`](@ref) into `Float16`, `BFloat16`, `Float32` or `Float64`
+reduces to a call of this method, the same way conversions into a
+`Microfloat` reduce to the four-argument form.
+
+Every `Microfloat` is exactly representable in `BFloat16` (at most 7
+significand bits and 8 exponent bits), and so in `Float32` and `Float64`:
+widening never rounds, which is why this form takes no rounding mode or
+overflow policy. `Float16` has a narrower exponent range than some formats
+(`Float8_E8M0FNU`); it receives the exact `Float32` value rounded by
+`Float16(::Float32)`.
+
+Like the narrowing form this is the extension surface for device backends,
+which override it for the destinations their hardware widens to natively.
+"""
+@inline cvt(::Type{F}, x::Microfloat) where F<:WideFloat = cvt_generic(F, x)
+
+# Reference widening path, the counterpart of the narrowing `cvt_generic`:
+# a lookup of the BFloat16 encoding generated per type by `@microfloat`.
+@inline cvt_generic(::Type{Float32}, x::Microfloat) =
+    # Shift the BFloat16 *encoding* into a Float32 instead of materializing a
+    # BFloat16: on Julia >= 1.12, a BFloat16 value crossing a function-call
+    # boundary has subnormals flushed to zero on CPUs with native BF16
+    # instructions (e.g. Zen 4), which corrupts E8M0's 2^-127.
+    reinterpret(Float32, UInt32(to_bfloat16_bits(x)) << 16)
+@inline cvt_generic(::Type{BFloat16}, x::Microfloat) = to_bfloat16(x)
+@inline cvt_generic(::Type{F}, x::Microfloat) where F<:Union{Float16,Float64} =
+    F(cvt_generic(Float32, x))
+
+# Constructors are sugar over the funnel, as on the narrowing side. Base then
+# supplies `T(::Float32)` for the remaining numeric types (Int*, BigFloat).
+# One method per destination: a `Union`-bounded type variable would be
+# ambiguous with constructors such as `BFloat16(::AbstractFloat)`.
+for F in (Float16, BFloat16, Float32, Float64)
+    @eval (::Type{$F})(x::Microfloat) = cvt($F, x)
+end
+(::Type{T})(x::Microfloat) where T<:Number = T(cvt(Float32, x))
+# Base constructors that are more specific in the destination but less
+# specific in the source than the catch-all above.
+Base.Complex{T}(x::Microfloat) where T<:Real = Complex{T}(T(x), zero(T))
+Base.Complex(x::Microfloat) = Complex(x, zero(x))
+Base.Rational{T}(x::Microfloat) where T<:Integer = Rational{T}(cvt(Float32, x))
+Base.Rational{BigInt}(x::Microfloat) = Rational{BigInt}(cvt(Float32, x))
+
+# Microfloat → Microfloat: disambiguates the methods above; the default
 # `cvt` route goes through Float32 (matching the Real-input path and avoiding
 # the BFloat16 intermediate's narrower exponent dynamic range) unless a
 # specialized `cvt` method — e.g. one registered by `@cvt_table` — applies.

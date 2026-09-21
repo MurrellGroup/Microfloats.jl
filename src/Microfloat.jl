@@ -166,7 +166,7 @@ Base.eps(T::Type{<:Microfloat}) = eps(one(T))
 Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(Unsigned, x) & ~sign_mask(T))
 Base.iszero(x::T) where T<:Microfloat = significand_bits(T) == 0 ? false : abs(x) === zero(T)
 Base.:(-)(x::T) where T<:Microfloat =
-    sign_bits(T) == 0 ? throw(DomainError(x, "cannot negate unsigned $T")) :
+    sign_bits(T) == 0 ? throw_negate_unsigned(T, x) :
     reinterpret(T, sign_mask(T) ⊻ reinterpret(Unsigned, x))
 Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
@@ -175,6 +175,11 @@ Base.precision(::Type{T}) where T<:Microfloat = significand_bits(T) + 1
 Base.sign(x::Microfloat) = ifelse(isnan(x) | iszero(x), x, ifelse(signbit(x), -one(x), one(x)))
 
 Base.round(x::T, r::RoundingMode; kws...) where T<:Microfloat = T(round(Float32(x), r; kws...))
+# Base defines these modes on `AbstractFloat`, which is more specific in the
+# mode and less specific in the value than the method above.
+for M in (:FromZero, :NearestTiesAway, :NearestTiesUp)
+    @eval Base.round(x::T, r::RoundingMode{$(QuoteNode(M))}) where T<:Microfloat = T(round(Float32(x), r))
+end
 
 Base.issubnormal(x::T) where T<:Microfloat =
     0x00 < (reinterpret(Unsigned, x) & ~sign_mask(T)) <= (UInt8(0x01) << significand_bits(T)) - 0x01

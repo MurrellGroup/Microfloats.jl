@@ -136,4 +136,40 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
             @test Tuple(SV{4,T}(SV{4,Float32}(xs), mode; overflow=Microfloats.SAT)) === want
         end
     end
+
+    @testset "widening funnel" begin
+        using Microfloats: SVector, NVector, WideFloat
+        # exact: every value survives Float16/BFloat16/Float32/Float64 and
+        # back, except where Float16's range is too narrow
+        for T in TYPES, raw in 0x00:UInt8(2^bitwidth(T) - 1)
+            x = reinterpret(T, raw)
+            for F in (BFloat16, Float32, Float64)
+                y = cvt(F, x)
+                @test y isa F
+                @test F(x) === y                                   # constructors are sugar
+                @test cvt_generic(F, x) === y
+                @test isnan(x) ? isnan(y) : isinf(x) ? (isinf(y) && signbit(y) == signbit(x)) :
+                      T(y; overflow=Microfloats.SAT) === x
+            end
+            @test cvt(Float16, x) === Float16(cvt(Float32, x))
+            @test isnan(x) || Float64(cvt(BFloat16, x)) == cvt(Float64, x)
+        end
+
+        # vector forms agree with the scalar funnel for every source container
+        for T in TYPES_BUILTIN, F in (Float16, BFloat16, Float32, Float64)
+            xs = ntuple(i -> reinterpret(T, UInt8(i * 7 % 2^bitwidth(T))), 4)
+            want = SVector{4,F}(map(x -> cvt(F, x), xs))
+            same(a, b) = all(map((p, q) -> isequal(p, q), Tuple(a), Tuple(b)))
+            @test same(cvt(SVector{4,F}, xs), want)
+            @test same(cvt(SVector{4,F}, SVector{4,T}(xs)), want)
+            @test same(cvt(SVector{4,F}, NVector{T,4}(xs)), want)
+            @test same(SVector{4,F}(SVector{4,T}(xs)), want)
+            @test same(SVector{4,F}(NVector{T,4}(xs)), want)
+            @test SVector{4,F}(NVector{T,4}(xs)) isa SVector{4,F}
+        end
+    end
+
+    @testset "no method ambiguities" begin
+        @test isempty(Test.detect_ambiguities(Microfloats; recursive=true))
+    end
 end
