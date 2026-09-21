@@ -36,7 +36,7 @@ const SIGNED_TYPES = (
 )
 
 const UNSIGNED_TYPES = (
-    Float8_E8M0FNU,
+    Float8_E8M0FNU, Float8_E5M3FNU,
     UFloat7_E3M4, UFloat7_E4M3, UFloat7_E5M2,
     UFloat7_E4M3FN,
     UFloat5_E2M3, UFloat5_E3M2,
@@ -48,7 +48,7 @@ const TYPES = (SIGNED_TYPES..., UNSIGNED_TYPES...)
 # Shipped types, which have @cvt_table lookup methods registered
 const TYPES_BUILTIN = (
     Float8_E5M2, Float8_E4M3, Float8_E3M4,
-    Float8_E4M3FN, Float8_E8M0FNU,
+    Float8_E4M3FN, Float8_E8M0FNU, Float8_E5M3FNU,
     Float6_E2M3FN, Float6_E3M2FN,
     Float4_E2M1FN,
 )
