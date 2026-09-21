@@ -16,6 +16,7 @@ makedocs(;
         "Home" => "index.md",
         "The Microfloat type" => "microfloat.md",
         "Predefined types" => "predefined.md",
+        "Conversion" => "conversion.md",
     ],
 )
 
