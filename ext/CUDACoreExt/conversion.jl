@@ -1,8 +1,11 @@
 # Device-side conversion overrides.
 #
 # Microfloats funnels every conversion through `cvt(T, x, mode, policy)`
-# (scalar) and `cvt(NVector{T,N}, xs, mode, policy)` (vector), with the
-# rounding mode and overflow policy as positional, dispatchable arguments.
+# (scalar), `cvt(SVector{N,T}, xs, mode, policy)` (one lane per byte) and
+# `cvt(NVector{T,N}, xs, mode, policy)` (densely packed), with the rounding
+# mode and overflow policy as positional, dispatchable arguments. The packed
+# default converts through the SVector form, so an SVector override also
+# serves dense destinations.
 # This file therefore only needs to override:
 #
 #   1. the error hooks — so the *generic* numeric kernels run unmodified on
@@ -33,6 +36,7 @@ using Microfloats: Microfloat, cvt, cvt_generic, cvt_lanes,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
                    Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN
 using BitPacking: NArray, NVector
+using StaticArrays: SVector
 using CUDACore: CUDACore, @device_override, compute_capability, target_feature_set
 
 # ───────────────────────── error hooks ──────────────────────────
@@ -92,17 +96,15 @@ end
     :(Base.llvmcall(($ir, "entry"), UInt16, Tuple{Float32,Float32}, lo, hi))
 end
 
-# ───────────────────────── bit repacking ──────────────────────────
+# ───────────────────────── result layouts ──────────────────────────
 
-# PTX returns byte-aligned lanes; NVector packs lanes densely (lane 1 at the
-# LSB). 8-bit lanes coincide; 6-/4-bit lanes need compaction into the exact
-# storage representation BitPacking's `pack` would choose.
+# PTX fp8/fp6/ue8m0 pair conversions return one lane per byte, lane 1 (`b`)
+# in the low byte: an SVector of one-byte Microfloats. For 8-bit formats that
+# is also the dense NVector layout. fp4 pairs come back dense, two lanes per
+# byte, which is the NVector layout.
 
-# 2×6-bit: byte-aligned b16 → dense 12 bits → NTuple{2,UInt8} storage.
-@inline function fp6_pair_storage(bits::UInt16)
-    dense = (bits & 0x003f) | ((bits >> 2) & 0x0fc0)
-    (dense % UInt8, (dense >> 8) % UInt8)
-end
+@inline byte_lanes(::Type{T}, bits::UInt16) where {T} =
+    SVector{2,T}(reinterpret(T, bits % UInt8), reinterpret(T, (bits >> 8) % UInt8))
 
 @inline pack2(::Type{T}, data::D) where {T,D} = NArray{T,1,Tuple{2},D}(data)
 @inline pack4(::Type{T}, data::D) where {T,D} = NArray{T,1,Tuple{4},D}(data)
@@ -146,21 +148,22 @@ for (T, instr) in ((Float6_E2M3FN, "cvt.rn.satfinite.e2m3x2.f32"),
             return reinterpret($T, (cvt_pair_bits($v, x, x) % UInt8) & 0x3f)
         end
 
-        @device_override @inline function Microfloats.cvt(::Type{NVector{$T,2}}, xs::NTuple{2,Float32},
+        # One lane per byte is the native result, so no repacking. Dense
+        # NVector{T,N} destinations pack this result through the generic funnel.
+        @device_override @inline function Microfloats.cvt(::Type{SVector{2,$T}}, xs::NTuple{2,Float32},
                                                           mode::RoundingMode{:Nearest}, policy::Saturating)
-            has_mxfp_cvt() || return cvt_lanes(NVector{$T,2}, xs, mode, policy)
+            has_mxfp_cvt() || return cvt_lanes(SVector{2,$T}, xs, mode, policy)
             (isnan(xs[1]) | isnan(xs[2])) && throw_no_nan($T, xs)
-            return pack2($T, fp6_pair_storage(cvt_pair_bits($v, xs[1], xs[2])))
+            return byte_lanes($T, cvt_pair_bits($v, xs[1], xs[2]))
         end
 
-        @device_override @inline function Microfloats.cvt(::Type{NVector{$T,4}}, xs::NTuple{4,Float32},
+        @device_override @inline function Microfloats.cvt(::Type{SVector{4,$T}}, xs::NTuple{4,Float32},
                                                           mode::RoundingMode{:Nearest}, policy::Saturating)
-            has_mxfp_cvt() || return cvt_lanes(NVector{$T,4}, xs, mode, policy)
+            has_mxfp_cvt() || return cvt_lanes(SVector{4,$T}, xs, mode, policy)
             (isnan(xs[1]) | isnan(xs[2]) | isnan(xs[3]) | isnan(xs[4])) && throw_no_nan($T, xs)
-            lo = fp6_pair_storage(cvt_pair_bits($v, xs[1], xs[2]))
-            hi = fp6_pair_storage(cvt_pair_bits($v, xs[3], xs[4]))
-            # dense 24-bit little-endian layout: lanes 1-2 in bits 0-11, 3-4 in 12-23
-            return pack4($T, (lo[1], lo[2] | (hi[1] << 4), (hi[1] >> 4) | (hi[2] << 4)))
+            lo = byte_lanes($T, cvt_pair_bits($v, xs[1], xs[2]))
+            hi = byte_lanes($T, cvt_pair_bits($v, xs[3], xs[4]))
+            return SVector{4,$T}(lo[1], lo[2], hi[1], hi[2])
         end
     end
 end

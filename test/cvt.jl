@@ -122,5 +122,18 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         # x4 entry constructor
         v4 = Microfloats.Float6x4_E2M3FN(SV{4,Float32}(0f0, 1f0, 1.5f0, 2f0))
         @test Tuple(v4) == (Float6_E2M3FN(0), Float6_E2M3FN(1), Float6_E2M3FN(1.5), Float6_E2M3FN(2))
+
+        # Both vector forms agree with the scalar funnel lane by lane, and the
+        # packed default (convert unpacked, then pack) agrees with packing
+        # lanewise conversions.
+        xs = (0.3f0, -7.9f0, 1f9, -0.0f0)
+        for T in (Float6_E2M3FN, Float6_E3M2FN, Float8_E4M3FN, Float8_E5M2),
+            mode in (RoundNearest, RoundToZero, RoundUp, RoundDown)
+            want = map(x -> cvt(T, x, mode, Microfloats.SAT), xs)
+            @test Tuple(cvt(SV{4,T}, xs, mode, Microfloats.SAT)) === want
+            @test cvt(NV{T,4}, xs, mode, Microfloats.SAT) ===
+                  Microfloats.cvt_lanes(NV{T,4}, xs, mode, Microfloats.SAT)
+            @test Tuple(SV{4,T}(SV{4,Float32}(xs), mode; overflow=Microfloats.SAT)) === want
+        end
     end
 end
