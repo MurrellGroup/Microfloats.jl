@@ -36,7 +36,7 @@ const SIGNED_TYPES = (
 )
 
 const UNSIGNED_TYPES = (
-    Float8_E8M0FNU,
+    Float8_E8M0FNU, Float8_E5M3FNU,
     UFloat7_E3M4, UFloat7_E4M3, UFloat7_E5M2,
     UFloat7_E4M3FN,
     UFloat5_E2M3, UFloat5_E3M2,
@@ -44,6 +44,14 @@ const UNSIGNED_TYPES = (
 )
 
 const TYPES = (SIGNED_TYPES..., UNSIGNED_TYPES...)
+
+# Shipped types, which have @cvt_table lookup methods registered
+const TYPES_BUILTIN = (
+    Float8_E5M2, Float8_E4M3, Float8_E3M4,
+    Float8_E4M3FN, Float8_E8M0FNU, Float8_E5M3FNU,
+    Float6_E2M3FN, Float6_E3M2FN,
+    Float4_E2M1FN,
+)
 
 # OCP Microscaling Formats v1.0 aliases
 const MX_E5M2 = Float8_E5M2
@@ -53,15 +61,20 @@ const MX_E2M3 = Float6_E2M3FN
 const MX_E2M1 = Float4_E2M1FN
 const MX_E8M0 = Float8_E8M0FNU
 
-@testset "Microfloats" begin
+import CUDACore
+
+@testset "Microfloats.jl" begin
     include("basic.jl")
+    include("cvt.jl")
     include("overflow.jl")
     include("floatmin.jl")
     include("rounding_modes.jl")
+    include("vectorization.jl")
     include("mx_compliance.jl")
     include("mx_properties.jl")
     include("dlfp8_parity.jl")
-    
+
     # extensions
     include("extensions/CUDACore.jl")
+    include("cuda_extension.jl")
 end

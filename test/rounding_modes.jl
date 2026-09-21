@@ -127,3 +127,19 @@ end
     v = nextfloat(1.0078125f0)
     @test Float64(_E1M7_FN(v)) == 1.015625
 end
+
+@testset "E8M0 at and below its smallest value" begin
+    # 2^-127 is a Float32 subnormal and E8M0's smallest value (it has no zero).
+    T = Float8_E8M0FNU
+    raw(x, mode) = reinterpret(UInt8, T(x, mode; overflow=SAT))
+    for mode in (RoundNearest, RoundNearestTiesAway, RoundToZero, RoundFromZero, RoundUp, RoundDown)
+        @test raw(2f0^-127, mode) == 0x00          # exact
+        @test raw(2f0^-126, mode) == 0x01          # exact
+        @test raw(2f0^-130, mode) == 0x00          # below the range: the smallest value
+        @test raw(nextfloat(0f0), mode) == 0x00
+        @test T(T(2f0^-127), mode) === T(2f0^-127) # identity through the lookup table
+    end
+    between = nextfloat(2f0^-127)
+    @test raw(between, RoundToZero) == raw(between, RoundDown) == raw(between, RoundNearest) == 0x00
+    @test raw(between, RoundUp) == raw(between, RoundFromZero) == 0x01
+end

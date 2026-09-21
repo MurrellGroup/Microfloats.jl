@@ -21,6 +21,20 @@ using Microfloats: @microfloat
 
 or find [predefined types](https://murrellgroup.github.io/Microfloats.jl/stable/predefined/) in the documentation.
 
+Conversions take a rounding mode and an overflow policy, and work on scalars, on static vectors with one value per byte, and on densely packed vectors:
+
+```julia
+using Microfloats
+using Microfloats: SVector, NVector, SAT
+
+Float8_E4M3FN(1000f0, RoundToZero; overflow=SAT)                    # Float8_E4M3FN(448.0)
+
+packed = NVector{Float4_E2M1FN,4}(SVector(0.5f0, 1f0, -6f0, 100f0)) # two bytes
+SVector{4,Float32}(packed)                                          # 0.5, 1.0, -6.0, 6.0
+```
+
+All of them reduce to one dispatchable function, `Microfloats.cvt`. With CUDACore loaded, kernels and broadcasts lower it to native conversion instructions on GPUs that have them. See [Conversion](https://murrellgroup.github.io/Microfloats.jl/dev/conversion/) in the documentation.
+
 ## Installation
 
 ```julia

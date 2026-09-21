@@ -1,8 +1,7 @@
-module CUDACoreExt
+import CUDACore: cudaDataType
 
-import Microfloats
-import CUDACore: CUDACore, cudaDataType
-
+# Defined per constant so the extension loads against CUDACore versions that
+# predate some of the narrow data types.
 for (name, cuda_name) in (
     :Float8_E4M3FN  => :R_8F_E4M3,
     :Float8_E5M2    => :R_8F_E5M2,
@@ -15,6 +14,4 @@ for (name, cuda_name) in (
     if isdefined(CUDACore, cuda_name)
         @eval Base.convert(::Type{cudaDataType}, ::Type{Microfloats.$name}) = CUDACore.$cuda_name
     end
-end
-
 end
