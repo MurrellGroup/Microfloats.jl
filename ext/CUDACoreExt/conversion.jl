@@ -23,7 +23,9 @@
 #      `compute_capability()`, the target's feature set and
 #      `ptx_isa_version()` are compile-time constants under GPUCompiler, so each kernel compiles
 #      to either the native instruction or the generic path, with no runtime
-#      branch.
+#      branch;
+#   3. `max_twiddle_cost`, so `@cvt_table` methods prefer a lookup on device
+#      where the host prefers a bit-twiddle.
 #
 # PTX `cvt` into a sub-byte or 8-bit float format only exists as `.satfinite`,
 # so every native narrowing implements the `SAT` overflow policy; `OVF`
@@ -289,3 +291,11 @@ for (T, name, nibbles, destinations) in WIDENING, (H, destination, gate) in dest
         end
     end
 end
+
+# ───────────────────────── @cvt_table methods ──────────────────────────
+
+# A lookup in a small constant table is one load through the read-only cache,
+# which in device code beats a bit-twiddle of more than one linear piece and
+# a sign move. A lone shift, such as Float4_E2M1FN to Float6_E2M3FN, still
+# wins.
+@device_override Microfloats.max_twiddle_cost() = 2

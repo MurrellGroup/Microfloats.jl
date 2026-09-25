@@ -102,6 +102,24 @@ svector4(::Type{T}, a, b, c, d) where T =
             end
         end
 
+        # @cvt_table methods: the device lowers the twiddle cutoff, so most
+        # pairs take the lookup there and the twiddle on the host. Both must
+        # match the generic path over every bit pattern.
+        @testset "microfloat → microfloat, every bit pattern" begin
+            bad = []
+            for S in SCALAR_TARGETS, T in SCALAR_TARGETS, pol in (Microfloats.SAT, Microfloats.OVF)
+                xs = reinterpret.(S, UInt8.(0:2^bitwidth(S) - 1))
+                expected = try
+                    T.(xs; overflow=pol)
+                catch
+                    continue
+                end
+                got = gpu_broadcast(T, xs, RoundNearest; overflow=pol)
+                samebits(got, expected) || push!(bad, (S, T, pol))
+            end
+            @test isempty(bad)
+        end
+
         f16x2 = [svector2(Float16, 0f0, 1f0), svector2(Float16, 1.5f0, 2f0)]
         bf16x2 = [svector2(Microfloats.BFloat16, 0f0, 1f0), svector2(Microfloats.BFloat16, 1.5f0, 2f0)]
         f32x2 = [svector2(Float32, 0f0, 1f0), svector2(Float32, 1.5f0, 2f0)]

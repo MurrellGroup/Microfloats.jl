@@ -16,8 +16,8 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         end
     end
 
-    @testset "table specializations ≡ generic path" begin
-        # Built-in pairs have @cvt_table-generated methods; they must agree
+    @testset "@cvt_table methods ≡ generic path" begin
+        # Built-in pairs have @cvt_table-generated methods (twiddles or tables); they must agree
         # with the runtime generic path for every bit pattern, mode, policy.
         bad = []
         for S in TYPES_BUILTIN, T in TYPES_BUILTIN,
@@ -54,32 +54,59 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         end
     end
 
-    @testset "bit-twiddling specializations ≡ generic path" begin
-        # scalar twiddle: exact widening, so every mode/policy must agree
-        for T in (Float8_E4M3, Float8_E4M3FN),
-            mode in (RoundNearest, RoundToZero, RoundUp, RoundDown),
-            pol in (Microfloats.SAT, Microfloats.OVF)
+    @testset "bit-twiddles" begin
+        MODES = (RoundNearest, RoundToZero, RoundUp, RoundDown, RoundFromZero, RoundNearestTiesAway)
+        evaluate(pieces, i) = (p = pieces[findlast(p -> p[1] <= i, pieces)]; p[2] * UInt8(i) + p[3])
 
-            for raw in 0x00:0x0f
-                x = reinterpret(Float4_E2M1FN, raw)
-                @test cvt(T, x, mode, pol) === cvt_generic(T, Float32(x), mode, pol)
+        # The fitted pieces reproduce every table exactly, for every pair,
+        # mode and policy, whether or not the cost admits a twiddle (the
+        # device takes the lookup where the host takes the twiddle).
+        bad = []
+        for S in TYPES, T in TYPES, mode in MODES, pol in (Microfloats.SAT, Microfloats.OVF)
+            table = Microfloats.cvt_generic_table(T, S, mode, pol)
+            table === nothing && continue
+            pieces, mask, shift = Microfloats.twiddle_fit(T, S, table)
+            for raw in 0:length(table) - 1
+                t = evaluate(pieces, raw & mask)
+                if shift !== nothing
+                    s = UInt8(raw) & Microfloats.sign_mask(S)
+                    t |= shift >= 0 ? s << shift : s >> -shift
+                end
+                t == table[raw + 1] || push!(bad, (S, T, mode, pol, raw))
             end
         end
-        # packed → packed twiddle vs lanewise reference, all storage patterns
-        NV, NA = Microfloats.NVector, Microfloats.NArray
-        for T in (Float8_E4M3, Float8_E4M3FN)
+        @test isempty(bad)
+
+        # Exact widenings are independent of mode and policy, and cheap.
+        exact = (
+            (Float4_E2M1FN, Float6_E2M3FN) => 1, (Float4_E2M1FN, Float6_E3M2FN) => 3,
+            (Float4_E2M1FN, Float8_E3M4) => 3, (Float4_E2M1FN, Float8_E4M3) => 4,
+            (Float4_E2M1FN, Float8_E4M3FN) => 4, (Float4_E2M1FN, Float8_E5M2) => 4,
+            (Float6_E2M3FN, Float8_E3M4) => 4, (Float6_E2M3FN, Float8_E4M3) => 5,
+            (Float6_E2M3FN, Float8_E4M3FN) => 5, (Float6_E3M2FN, Float8_E4M3) => 5,
+            (Float6_E3M2FN, Float8_E4M3FN) => 5, (Float6_E3M2FN, Float8_E5M2) => 5,
+        )
+        for ((S, T), cost) in exact, mode in MODES, pol in (Microfloats.SAT, Microfloats.OVF)
+            table = Microfloats.cvt_generic_table(T, S, mode, pol)
+            @test Microfloats.twiddle_cost(Microfloats.twiddle_fit(T, S, table)) == cost
+        end
+
+        # Packed → packed for any length: the lanewise path unpacks, twiddles
+        # each lane and packs. Exhaustive over storage for 2 and 4 lanes.
+        NV = Microfloats.NVector
+        for (S, T) in ((Float4_E2M1FN, Float8_E4M3FN), (Float4_E2M1FN, Float8_E5M2),
+                       (Float4_E2M1FN, Float6_E2M3FN), (Float6_E2M3FN, Float8_E4M3))
             bad = 0
-            for raw in 0x00:0xff
-                xs = NA{Float4_E2M1FN,1,Tuple{2},UInt8}(raw)
-                a = cvt(NV{T,2}, xs, RoundNearest, Microfloats.SAT)
-                b = Microfloats.cvt_lanes(NV{T,2}, Tuple(xs), RoundNearest, Microfloats.SAT)
-                bad += a !== b
-            end
-            for raw in 0x0000:0xffff
-                xs = NA{Float4_E2M1FN,1,Tuple{4},UInt16}(UInt16(raw))
-                a = cvt(NV{T,4}, xs, RoundNearest, Microfloats.SAT)
-                b = Microfloats.cvt_lanes(NV{T,4}, Tuple(xs), RoundNearest, Microfloats.SAT)
-                bad += a !== b
+            mask = UInt8(2^bitwidth(S) - 1)
+            for (N, U, raws) in ((2, UInt16, 0x0000:0x0fff), (4, UInt32, rand(UInt32, 2^14)),
+                                 (8, UInt64, rand(UInt64, 2^12)))
+                for raw in raws
+                    lanes = ntuple(i -> reinterpret(S, (raw >> (8(i - 1))) % UInt8 & mask), N)
+                    xs = NV{S,N}(lanes)
+                    a = cvt(NV{T,N}, xs, RoundNearest, Microfloats.SAT)
+                    b = ntuple(i -> cvt_generic(T, Float32(lanes[i]), RoundNearest, Microfloats.SAT), N)
+                    bad += Tuple(a) !== b
+                end
             end
             @test bad == 0
         end

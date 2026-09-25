@@ -87,14 +87,34 @@ Optimized implementations are ordinary methods on the funnel, chosen by
 dispatch:
 
 1. [`Microfloats.cvt_generic`](@ref) is the bit-level reference path.
-2. [`Microfloats.@cvt_table`](@ref) registers a lookup table for one pair of
-   microfloat types. Every built-in pair has one.
-3. Hand-written methods, such as the exact `Float4_E2M1FN` to `Float8_E4M3FN`
-   widening, which also converts packed storage to packed storage directly.
+2. [`Microfloats.@cvt_table`](@ref) compiles the generic results for one pair
+   of microfloat types into a bit-twiddle or a lookup table. Every built-in
+   pair has one.
+3. Hand-written methods.
 4. Device overrides in package extensions.
+
+`@cvt_table` runs every source bit pattern through the generic path and fits
+the results with linear pieces `(i << k) + c` over the source bits `i`. Exact
+widenings, such as `Float4_E2M1FN` to `Float8_E4M3FN`, are one piece over the
+source normals and one per binade of source subnormals; saturated and NaN
+results are constant pieces. A combination with few pieces becomes a
+branch-free twiddle, which vectorizes and so also serves packed sources and
+destinations of any length:
+
+```julia
+# Float4_E2M1FN => Float8_E4M3FN, any rounding mode and overflow policy
+i = reinterpret(UInt8, x) & 0x07
+t = ifelse(i >= 0x02, (i << 2) + 0x30, ifelse(i >= 0x01, (i << 3) + 0x28, 0x00))
+t |= (reinterpret(UInt8, x) & 0x08) << 4
+```
+
+Everything else is a lookup. [`Microfloats.max_twiddle_cost`](@ref) sets the
+cutoff; the CUDA extension lowers it, since on the device a cached table load
+beats all but the shortest twiddles.
 
 ```@docs
 Microfloats.@cvt_table
+Microfloats.max_twiddle_cost
 ```
 
 ## CUDA
