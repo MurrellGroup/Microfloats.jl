@@ -56,23 +56,48 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
 
     @testset "bit-twiddles" begin
         MODES = (RoundNearest, RoundToZero, RoundUp, RoundDown, RoundFromZero, RoundNearestTiesAway)
-        evaluate(pieces, i) = (p = pieces[findlast(p -> p[1] <= i, pieces)]; p[2] * UInt8(i) + p[3])
+        # A twiddle evaluated by interpretation rather than generated code.
+        function evaluate(tw::Microfloats.Twiddle{U}, ::Type{S}, raw, head) where {U,S}
+            i = raw & tw.mask
+            t = if i < tw.head
+                head(i)
+            else
+                p = tw.pieces[findlast(p -> p[1] <= i, tw.pieces)]
+                p[2] * U(i) + p[3]
+            end
+            if tw.shift !== nothing
+                s = U(UInt8(raw) & Microfloats.sign_mask(S))
+                t |= tw.shift >= 0 ? s << tw.shift : s >> -tw.shift
+            end
+            return t
+        end
 
-        # The fitted pieces reproduce every table exactly, for every pair,
+        # The fitted twiddles reproduce every table exactly, for every pair,
         # mode and policy, whether or not the cost admits a twiddle (the
         # device takes the lookup where the host takes the twiddle).
         bad = []
         for S in TYPES, T in TYPES, mode in MODES, pol in (Microfloats.SAT, Microfloats.OVF)
             table = Microfloats.cvt_generic_table(T, S, mode, pol)
             table === nothing && continue
-            pieces, mask, shift = Microfloats.twiddle_fit(T, S, table)
+            tw = Microfloats.twiddle_fit(table, S, sign_bits(T) == 1 ? bitwidth(T) - 1 : nothing)
             for raw in 0:length(table) - 1
-                t = evaluate(pieces, raw & mask)
-                if shift !== nothing
-                    s = UInt8(raw) & Microfloats.sign_mask(S)
-                    t |= shift >= 0 ? s << shift : s >> -shift
-                end
-                t == table[raw + 1] || push!(bad, (S, T, mode, pol, raw))
+                evaluate(tw, S, raw, nothing) == table[raw + 1] || push!(bad, (S, T, mode, pol, raw))
+            end
+        end
+        @test isempty(bad)
+
+        # Likewise for widening, whose twiddles may start with the FPU head
+        # for zero and the subnormals.
+        bad = []
+        for S in TYPES, F in (Float16, BFloat16, Float32)
+            U = Microfloats.wide_bits(F)
+            head = i -> Microfloats.widen_subnormal(F, S, i)
+            table = [reinterpret(U, cvt_generic(F, reinterpret(S, UInt8(r)))) for r in 0:2^bitwidth(S) - 1]
+            tw = Microfloats.twiddle_fit(table, S, 8 * sizeof(U) - 1;
+                                         head = Microfloats.significand_bits(S) > 0 ?
+                                                (2^Microfloats.significand_bits(S), head) : nothing)
+            for raw in 0:length(table) - 1
+                evaluate(tw, S, raw, head) == table[raw + 1] || push!(bad, (S, F, raw))
             end
         end
         @test isempty(bad)
@@ -88,7 +113,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         )
         for ((S, T), cost) in exact, mode in MODES, pol in (Microfloats.SAT, Microfloats.OVF)
             table = Microfloats.cvt_generic_table(T, S, mode, pol)
-            @test Microfloats.twiddle_cost(Microfloats.twiddle_fit(T, S, table)) == cost
+            @test Microfloats.twiddle_cost(Microfloats.twiddle_fit(table, S, bitwidth(T) - 1)) == cost
         end
 
         # Packed → packed for any length: the lanewise path unpacks, twiddles
@@ -178,7 +203,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
                 @test isnan(x) ? isnan(y) : isinf(x) ? (isinf(y) && signbit(y) == signbit(x)) :
                       T(y; overflow=Microfloats.SAT) === x
             end
-            @test cvt(Float16, x) === Float16(cvt(Float32, x))
+            @test cvt(Float16, x) === Float16(cvt(Float32, x)) === cvt_generic(Float16, x)
             @test isnan(x) || Float64(cvt(BFloat16, x)) == cvt(Float64, x)
         end
 

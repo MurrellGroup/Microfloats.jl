@@ -451,8 +451,12 @@ overflow policy. `Float16` has a narrower exponent range than some formats
 (`Float8_E8M0FNU`); it receives the exact `Float32` value rounded by
 `Float16(::Float32)`.
 
-Like the narrowing form this is the extension surface for device backends,
-which override it for the destinations their hardware widens to natively.
+`@microfloat` registers a method per type that computes it with a
+branch-free bit-twiddle over the destination's bits where one is cheap (see
+[`max_twiddle_cost`](@ref)), and with the generic lookup otherwise; `Float64`
+extends the `Float32` result. Like the narrowing form this is the extension
+surface for device backends, which override it for the destinations their
+hardware widens to natively.
 """
 @inline cvt(::Type{F}, x::Microfloat) where F<:WideFloat = cvt_generic(F, x)
 
@@ -517,23 +521,25 @@ end
 # included), plus a piece per binade of source subnormals that the target
 # normalizes; saturated and NaN results are constant runs. A piece
 # `(lo, a, c)` maps each index `i` from `lo` up to the next piece to
-# `a * i + c` in UInt8 arithmetic, with `a` zero or a power of two, so it
-# costs a shift and an add. Returns the fewest pieces covering `table`.
-function linear_pieces(table::AbstractVector{UInt8})
+# `a * i + c` in the table's unsigned arithmetic, with `a` zero or a power of
+# two, so it costs a shift and an add. Returns the fewest pieces covering
+# `table`, whose first index is `first`.
+function linear_pieces(table::AbstractVector{U}, first::Int = 0) where U<:Unsigned
     n = length(table)
     # The piece starting at index `i` (1-based) takes its slope from its
     # first two entries and extends as far as they predict: `stop[i]`.
     stop = Vector{Int}(undef, n)
-    piece = Vector{Tuple{Int,UInt8,UInt8}}(undef, n)
+    piece = Vector{Tuple{Int,U,U}}(undef, n)
     for i in 1:n
-        a = i < n ? table[i + 1] - table[i] : 0x00
-        a == 0x00 || ispow2(a) || (a = 0x00)
-        c = table[i] - a * UInt8(i - 1)
+        k = U(first + i - 1)
+        a = i < n ? table[i + 1] - table[i] : zero(U)
+        iszero(a) || ispow2(a) || (a = zero(U))
+        c = table[i] - a * k
         j = i
-        while j < n && a * UInt8(j) + c == table[j + 1]
+        while j < n && a * U(first + j) + c == table[j + 1]
             j += 1
         end
-        stop[i], piece[i] = j, (i - 1, a, c)
+        stop[i], piece[i] = j, (first + i - 1, a, c)
     end
     # Fewest pieces for each prefix, then walk back from the full table.
     count = fill(typemax(Int), n + 1)
@@ -544,7 +550,7 @@ function linear_pieces(table::AbstractVector{UInt8})
             count[j + 1], from[j + 1] = count[i] + 1, i
         end
     end
-    pieces = Tuple{Int,UInt8,UInt8}[]
+    pieces = Tuple{Int,U,U}[]
     j = n + 1
     while j > 1
         pushfirst!(pieces, piece[from[j]])
@@ -553,80 +559,134 @@ function linear_pieces(table::AbstractVector{UInt8})
     return pieces
 end
 
-function piece_expr(i::Symbol, (_, a, c)::Tuple{Int,UInt8,UInt8})
-    a == 0x00 && return c
-    ai = a == 0x01 ? i : :($i << $(trailing_zeros(a)))
-    return c == 0x00 ? ai : :($ai + $c)
-end
-
-# Branch-free evaluation of `pieces` at index `i`: every piece is computed
-# and the last one starting at or below `i` is selected, which vectorizes
-# where a table lookup would be a gather.
-function pieces_expr(i::Symbol, pieces)
-    ex = piece_expr(i, pieces[1])
-    for p in pieces[2:end]
-        ex = :(ifelse($i >= $(UInt8(p[1])), $(piece_expr(i, p)), $ex))
-    end
-    return ex
+function piece_expr(i::Symbol, (_, a, c)::Tuple{Int,U,U}) where U
+    iszero(a) && return c
+    ai = isone(a) ? i : :($i << $(trailing_zeros(a)))
+    return iszero(c) ? ai : :($ai + $c)
 end
 
 """
     max_twiddle_cost() -> Int
 
-Largest cost of a bit-twiddle that [`@cvt_table`](@ref) methods prefer over
-a table lookup: its linear pieces, plus one if it moves a sign bit. Each
-piece is a shift, an add, a compare and a select on the byte. On CPUs the
-twiddle vectorizes where a lookup is a gather, and wins by a wide margin up
-to about twice this many pieces. Device backends override it: on GPUs a load
-from a small constant table hits the read-only cache and beats all but the
-shortest twiddles.
+Largest cost of a bit-twiddle that generated conversion methods (see
+[`@cvt_table`](@ref)) prefer over a table lookup: its pieces, plus one if it
+moves a sign bit. Each piece is a shift, an add, a compare and a select. On
+CPUs the twiddle vectorizes where a lookup is a gather, and wins by a wide
+margin up to about twice this many pieces. Device backends override it: on
+GPUs a load from a small constant table hits the read-only cache and beats
+all but the shortest twiddles.
 """
 max_twiddle_cost() = 8
 
-# The best twiddle for a `cvt_generic_table(T, S, ...)`: its pieces, the mask
-# that extracts their index from the source bits, and how far to shift the
-# source sign bit to the target's, or `nothing` if the pieces cover the sign.
-# The whole table always fits; when the sign moves across unchanged, the
-# magnitude half alone usually fits in fewer pieces.
-function twiddle_fit(::Type{T}, ::Type{S}, table::Vector{UInt8}) where {T<:Microfloat, S<:Microfloat}
+# A bit-twiddle computing a conversion table of `U` results from the source
+# bits: the index `i` is the source bits under `mask`. Indices below `head`
+# take a head expression (see `widen_subnormal`), the rest `pieces`. When
+# `shift` is not `nothing`, the index is the magnitude and the source sign
+# bit moves `shift` bits up.
+struct Twiddle{U<:Unsigned}
+    pieces::Vector{Tuple{Int,U,U}}
+    mask::UInt8
+    shift::Union{Int,Nothing}
+    head::Int
+end
+
+twiddle_cost(tw::Twiddle) = length(tw.pieces) + (tw.head > 0) + (tw.shift !== nothing)
+
+# The cheapest twiddle for the table of `S` conversions into a format whose
+# sign bit is `sign` (`nothing` if unsigned). The whole table always fits;
+# when the sign moves across unchanged, the magnitude half alone usually fits
+# in fewer pieces. `head` is `(n, f)` if `f(i)` computes the first `n`
+# magnitudes by other means; it is used where it matches the table.
+function twiddle_fit(table::Vector{U}, ::Type{S}, sign::Union{Int,Nothing};
+                     head = nothing) where {U<:Unsigned, S<:Microfloat}
     n = length(table)
-    candidates = Tuple{Vector{Tuple{Int,UInt8,UInt8}},UInt8,Union{Int,Nothing}}[
-        (linear_pieces(table), UInt8(n - 1), nothing)]
-    if sign_bits(S) == 1 && sign_bits(T) == 1
+    candidates = [Twiddle{U}(linear_pieces(table), UInt8(n - 1), nothing, 0)]
+    magnitude(h, shift) = if head !== nothing && head[1] < h &&
+                             all(head[2](i) == table[i + 1] for i in 0:head[1] - 1)
+        Twiddle{U}(linear_pieces(table[head[1] + 1:h], head[1]), UInt8(h - 1), shift, head[1])
+    else
+        Twiddle{U}(linear_pieces(table[1:h]), UInt8(h - 1), shift, 0)
+    end
+    if sign_bits(S) == 0
+        push!(candidates, magnitude(n, nothing))
+    elseif sign !== nothing
         h = n >> 1
-        if all(table[h + m + 1] == table[m + 1] | sign_mask(T) for m in 0:h - 1)
-            push!(candidates, (linear_pieces(table[1:h]), UInt8(h - 1), bitwidth(T) - bitwidth(S)))
+        if all(table[h + m + 1] == table[m + 1] | (one(U) << sign) for m in 0:h - 1)
+            push!(candidates, magnitude(h, sign - (bitwidth(S) - 1)))
         end
     end
     return argmin(twiddle_cost, candidates)
 end
 
-twiddle_cost((pieces, _, shift)) = length(pieces) + (shift === nothing ? 0 : 1)
+# Branch-free evaluation of a twiddle on `x::S`: every piece is computed and
+# the last one starting at or below the index is selected, which vectorizes
+# where a table lookup would be a gather.
+function twiddle_expr(tw::Twiddle{U}, ::Type{S}, head_expr = nothing) where {U, S}
+    ex = tw.head > 0 ? head_expr : piece_expr(:i, tw.pieces[1])
+    for p in (tw.head > 0 ? tw.pieces : tw.pieces[2:end])
+        ex = :(ifelse(i >= $(U(p[1])), $(piece_expr(:i, p)), $ex))
+    end
+    body = :(raw = reinterpret(UInt8, x); i = $U(raw & $(tw.mask)); t = $ex)
+    if tw.shift !== nothing
+        s = :($U(raw & $(sign_mask(S))))
+        push!(body.args, :(t |= $(tw.shift >= 0 ? :($s << $(tw.shift)) : :($s >> $(-tw.shift)))))
+    end
+    push!(body.args, :t)
+    return body
+end
+
+# Where both a twiddle and a lookup are candidates, the choice is
+# `max_twiddle_cost()`, which folds when the method is compiled, so device
+# overlays can pick differently than the host. Beyond twice the host default
+# a lookup wins everywhere.
+function twiddle_or(lookup, tw::Twiddle, twiddle)
+    cost = twiddle_cost(tw)
+    cost > 2 * max_twiddle_cost() && return lookup
+    return :($cost <= $max_twiddle_cost() ? $twiddle : $lookup)
+end
 
 # The cheapest correct code for one (T, S, mode, policy) combination: a
 # bit-twiddle when the generic results are piecewise linear in few pieces, a
-# `2^bitwidth(S)`-entry lookup otherwise. Where both are candidates, the
-# choice is `max_twiddle_cost()`, which folds when the method is compiled, so
-# device overlays can pick differently than the host.
+# `2^bitwidth(S)`-entry lookup otherwise.
 function cvt_expr(::Type{T}, ::Type{S}, ::Type{M}, ::Type{P}
                   ) where {T<:Microfloat, S<:Microfloat, M<:RoundingMode, P<:OverflowPolicy}
     table = cvt_generic_table(T, S, M.instance, P.instance)
     table === nothing && return :($cvt_generic($T, Float32(x), mode, policy))
-    raw = :(reinterpret(UInt8, x))
-    lookup = :(reinterpret($T, $(Tuple(table))[Int($raw & $(UInt8(length(table) - 1))) + 1]))
+    lookup = :(reinterpret($T, $(Tuple(table))[Int(reinterpret(UInt8, x) & $(UInt8(length(table) - 1))) + 1]))
+    tw = twiddle_fit(table, S, sign_bits(T) == 1 ? bitwidth(T) - 1 : nothing)
+    return twiddle_or(lookup, tw, :(reinterpret($T, $(twiddle_expr(tw, S)))))
+end
 
-    fit = twiddle_fit(T, S, table)
-    cost = twiddle_cost(fit)
-    # Beyond twice the host default a lookup wins everywhere.
-    cost > 2 * max_twiddle_cost() && return lookup
-    pieces, mask, shift = fit
-    twiddle = :(i = $raw & $mask; t = $(pieces_expr(:i, pieces)))
-    if shift !== nothing
-        s = :($raw & $(sign_mask(S)))
-        push!(twiddle.args, :(t |= $(shift >= 0 ? :($s << $shift) : :($s >> $(-shift)))))
-    end
-    push!(twiddle.args, :(reinterpret($T, t)))
-    return :($cost <= $max_twiddle_cost() ? $twiddle : $lookup)
+# ───────────────────────── generated widening ──────────────────────────
+
+wide_bits(::Type{F}) where F<:WideFloat = Base.uinttype(F)
+wide_bits(::Type{BFloat16}) = UInt16
+
+# Zero and the subnormals of `S`, widened to the bits of `F` through the
+# FPU: under the exponent of 2^(1-bias), the significand bits `i` read as
+# 2^(1-bias) * (1 + i/2^M), and subtracting 2^(1-bias) leaves exactly
+# i * 2^(1-bias-M), normalized. No operand is subnormal. One head piece in
+# place of a linear piece per binade of subnormals.
+@inline function widen_subnormal(::Type{F}, ::Type{S}, i) where {F<:Union{Float16,BFloat16,Float32}, S<:Microfloat}
+    magic = UInt32(1 - exponent_bias(S) + 127) << 23
+    v = reinterpret(Float32, (UInt32(i) << (23 - significand_bits(S))) | magic) - reinterpret(Float32, magic)
+    F === Float16 && return reinterpret(UInt16, Float16(v))
+    F === BFloat16 && return (reinterpret(UInt32, v) >> 16) % UInt16
+    return reinterpret(UInt32, v)
+end
+
+# Widening of `S` to `F`, generated per type by `@microfloat`: a bit-twiddle
+# over the bits of `F` when the generic results allow a cheap one, else the
+# generic lookup. Float64 extends the Float32 result, one instruction, which
+# beats a twiddle on 64-bit lanes (half as many per vector).
+function widen_expr(::Type{F}, ::Type{S}) where {F<:WideFloat, S<:Microfloat}
+    F === Float64 && return :(Float64($cvt(Float32, x)))
+    U = wide_bits(F)
+    table = [reinterpret(U, cvt_generic(F, reinterpret(S, raw % UInt8))) for raw in 0:(1 << bitwidth(S)) - 1]
+    head = significand_bits(S) > 0 ? (1 << significand_bits(S), i -> widen_subnormal(F, S, i)) : nothing
+    tw = twiddle_fit(table, S, 8 * sizeof(U) - 1; head)
+    twiddle = :(reinterpret($F, $(twiddle_expr(tw, S, :($widen_subnormal($F, $S, i))))))
+    return twiddle_or(:($cvt_generic($F, x)), tw, twiddle)
 end
 
 """

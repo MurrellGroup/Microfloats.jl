@@ -112,6 +112,13 @@ Everything else is a lookup. [`Microfloats.max_twiddle_cost`](@ref) sets the
 cutoff; the CUDA extension lowers it, since on the device a cached table load
 beats all but the shortest twiddles.
 
+Widening is generated the same way, without registration: `@microfloat` fits
+the conversions of each new type into `Float16`, `BFloat16` and `Float32` over
+the destination's bits. Normals are one linear piece. Zero and all subnormals
+share one piece evaluated on the FPU: the subnormal significand placed under
+the exponent of ``2^{1-\text{bias}}``, minus ``2^{1-\text{bias}}``, is the
+exact value, normalized. `Float64` extends the `Float32` result.
+
 ```@docs
 Microfloats.@cvt_table
 Microfloats.max_twiddle_cost
