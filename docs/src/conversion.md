@@ -32,6 +32,7 @@ julia> cvt(Float32, Float8_E4M3FN(1.5))
 ```@docs
 Microfloats.cvt
 Microfloats.cvt_generic
+Microfloats.cvt_twiddle
 Microfloats.cvt_lanes
 Microfloats.WideFloat
 ```
@@ -87,6 +88,9 @@ Optimized implementations are ordinary methods on the funnel, chosen by
 dispatch:
 
 1. [`Microfloats.cvt_generic`](@ref) is the bit-level reference path.
+   [`Microfloats.cvt_twiddle`](@ref) computes the same results branch-free and
+   is the default for `Float32` sources, and so for every source that
+   converts to `Float32` first.
 2. [`Microfloats.@cvt_table`](@ref) compiles the generic results for one pair
    of microfloat types into a bit-twiddle or a lookup table. Every built-in
    pair has one.
@@ -144,6 +148,6 @@ path otherwise. The choice is made when the kernel is compiled.
 
 Hardware narrowing always saturates, so native narrowing applies to the `SAT`
 policy with `RoundNearest` (or the two listed modes for `Float8_E8M0FNU`);
-everything else takes the generic path. Vector forms use one instruction per
-two lanes for any even `N`. Native and generic results agree bit for bit,
+everything else takes the branch-free `cvt_twiddle` path. Vector forms use
+one instruction per two lanes for any even `N`. Native and generic results agree bit for bit,
 apart from NaN payloads.

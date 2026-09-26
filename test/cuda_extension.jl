@@ -10,7 +10,7 @@ using Microfloats:
 
 using CUDACore
 using CUDACore: CuArray, @cuda
-using Microfloats: cvt, bitwidth
+using Microfloats: cvt, cvt_generic, bitwidth
 
 samebits(xs, ys) = reinterpret.(UInt8, xs) == reinterpret.(UInt8, ys)
 sametuples(xs, ys) = Tuple.(xs) == Tuple.(ys)
@@ -116,6 +116,36 @@ svector4(::Type{T}, a, b, c, d) where T =
                 end
                 got = gpu_broadcast(T, xs, RoundNearest; overflow=pol)
                 samebits(got, expected) || push!(bad, (S, T, pol))
+            end
+            @test isempty(bad)
+        end
+
+        # Float32 narrowing takes the native instruction where the target has
+        # one and the branch-free twiddle otherwise; both must match the
+        # generic path at every value, tie and overflow boundary.
+        @testset "Float32 narrowing at every boundary" begin
+            bad = []
+            for T in SCALAR_TARGETS
+                vals = sort(filter(isfinite, [Float32(reinterpret(T, UInt8(r))) for r in 0:2^bitwidth(T) - 1]))
+                xs = Float32[Inf, 0]
+                for (k, v) in enumerate(vals)
+                    w = k < length(vals) ? vals[k + 1] : 2v
+                    for c in (v, (v + w) / 2, 2v), d in -1:1
+                        push!(xs, reinterpret(Float32, reinterpret(UInt32, abs(c)) + (d % UInt32)))
+                    end
+                end
+                Microfloats.sign_bits(T) == 1 && append!(xs, .-xs)
+                Microfloats.hasnan(T) && push!(xs, NaN32)
+                for mode in (RoundNearest, RoundToZero, RoundUp, RoundDown, RoundFromZero, RoundNearestTiesAway),
+                    pol in (Microfloats.SAT, Microfloats.OVF)
+
+                    # the generic path throws for overflow without a sentinel
+                    ys = filter(x -> !Microfloats.twiddle_fails(T, x, mode, pol), xs)
+                    got = gpu_broadcast(T, ys, mode; overflow=pol)
+                    want = map(x -> cvt_generic(T, x, mode, pol), ys)
+                    naneq_bits(a, b) = (isnan(a) && isnan(b)) || a === b
+                    all(naneq_bits.(got, want)) || push!(bad, (T, mode, pol))
+                end
             end
             @test isempty(bad)
         end

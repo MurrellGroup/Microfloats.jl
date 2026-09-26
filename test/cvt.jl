@@ -140,6 +140,42 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         @test Tuple(Microfloats.Float8x2_E4M3FN(f4)) == (Float8_E4M3FN(0.5), Float8_E4M3FN(-6))
     end
 
+    @testset "branch-free Float32 narrowing ≡ generic path" begin
+        # Every representable value, the midpoints between neighbors (ties),
+        # and a few Float32 ulps around each, both signs; plus specials,
+        # Float32 subnormals and random bit patterns. The generic path's
+        # errors must match too.
+        function narrowing_inputs(T)
+            xs = Float32[0, -0.0, Inf, -Inf, NaN, -NaN, floatmin(Float32), nextfloat(0f0),
+                         prevfloat(floatmin(Float32)), floatmax(Float32)]
+            vals = [Float32(reinterpret(T, UInt8(raw))) for raw in 0:2^bitwidth(T) - 1]
+            vals = sort(filter(isfinite, vals))
+            for (k, v) in enumerate(vals)
+                w = k < length(vals) ? vals[k + 1] : 2v
+                for c in (v, (v + w) / 2, 2v, v / 2), d in -1:1
+                    push!(xs, reinterpret(Float32, reinterpret(UInt32, abs(c)) + (d % UInt32)))
+                end
+            end
+            append!(xs, reinterpret.(Float32, rand(UInt32, 2000) .& 0x7fffffff))
+            # Negative inputs throw for unsigned formats, and throwing is slow:
+            # a handful covers that path.
+            append!(xs, sign_bits(T) == 1 ? .-xs : Float32[-0.0, -1, -Inf, -floatmax(Float32)])
+            return xs
+        end
+        bad = []
+        for T in TYPES
+            xs = narrowing_inputs(T)
+            for mode in (RoundNearest, RoundToZero, RoundUp, RoundDown, RoundFromZero, RoundNearestTiesAway),
+                pol in (Microfloats.SAT, Microfloats.OVF), x in xs
+
+                a = _cvt_outcome(() -> Microfloats.cvt_twiddle(T, x, mode, pol))
+                b = _cvt_outcome(() -> cvt_generic(T, x, mode, pol))
+                a === b || push!(bad, (T, x, mode, pol, a, b))
+            end
+        end
+        @test isempty(bad)
+    end
+
     @testset "error hooks" begin
         @test_throws DomainError Float8_E8M0FNU(-1.0)
         @test_throws DomainError Float8_E8M0FNU(-0.0)

@@ -238,6 +238,142 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
     return apply_overflow_policy(reinterpret(T, t_raw), x, mode, policy)
 end
 
+# ───────────────────────── branch-free narrowing ──────────────────────────
+
+# Whether a directed mode rounds the magnitude up, for a value of sign `neg`.
+@inline rounds_up(::RoundingMode{:ToZero},   ::Bool) = false
+@inline rounds_up(::RoundingMode{:FromZero}, ::Bool) = true
+@inline rounds_up(::RoundingMode{:Up},   neg::Bool) = !neg
+@inline rounds_up(::RoundingMode{:Down}, neg::Bool) = neg
+
+# `a >> s` rounded per mode. On the bits of a positive Float32 this rounds
+# its significand, carrying into the exponent.
+@inline round_shift(a::UInt32, s::Int, ::RoundingMode{:Nearest}, ::Bool) =
+    (a + ((UInt32(1) << (s - 1)) - 0x1) + ((a >> s) & 0x1)) >> s
+@inline round_shift(a::UInt32, s::Int, ::RoundingMode{:NearestTiesAway}, ::Bool) =
+    (a + (UInt32(1) << (s - 1))) >> s
+@inline round_shift(a::UInt32, s::Int, mode::RoundingMode, neg::Bool) =
+    (a + ifelse(rounds_up(mode, neg), (UInt32(1) << s) - 0x1, UInt32(0))) >> s
+
+# `v ≥ 0`, below 2^8, rounded per mode to an integer. Nearest adds 2^23, which
+# leaves no fraction bits, so the FPU's own ties-to-even rounding applies.
+@inline round_int(v::Float32, ::RoundingMode{:Nearest}, ::Bool) =
+    reinterpret(UInt32, v + Float32(0x1p23)) - 0x4b000000
+@inline round_int(v::Float32, ::RoundingMode{:NearestTiesAway}, ::Bool) =
+    unsafe_trunc(UInt32, round(v, RoundNearestTiesAway))
+@inline round_int(v::Float32, mode::RoundingMode, neg::Bool) =
+    unsafe_trunc(UInt32, ifelse(rounds_up(mode, neg), ceil(v), v))
+
+# Bits of the Float32 equal to `2^e`, for e ≥ -149.
+@inline pow2_bits(e::Int) = e >= -126 ? UInt32(e + 127) << 23 : UInt32(1) << (e + 149)
+
+const TwiddledModes = Union{RoundingMode{:Nearest}, RoundingMode{:NearestTiesAway},
+                            RoundingMode{:ToZero}, RoundingMode{:FromZero},
+                            RoundingMode{:Up}, RoundingMode{:Down}}
+
+"""
+    cvt_twiddle(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) -> T
+
+Branch-free narrowing from `Float32`, the default [`cvt`](@ref) method for
+`Float32` sources (and so for every source that converts to `Float32`
+first). Results, and errors, are identical to [`cvt_generic`](@ref), which
+it calls for modes it does not cover.
+
+Target normals round the `Float32` bits directly: an integer add rounds the
+significand at the target's last significand bit, carrying into the
+exponent, and a subtraction rebiases. Target subnormals round `|x|` scaled
+to units of the smallest subnormal, which the FPU does exactly. Everything
+else is a select, so the only branches are the error checks, which the
+compiler removes for formats that cannot fail (e.g. signed formats with NaN).
+"""
+@inline function cvt_twiddle(::Type{T}, x::Float32, mode::TwiddledModes,
+                             policy::OverflowPolicy) where T<:Microfloat
+    twiddle_fails(T, x, mode, policy) && throw_twiddle_error(T, x, mode, policy)
+    return twiddle_bits(T, x, mode, policy)
+end
+
+# The magnitude of floatmax(T) and whether |x| exceeds it, which includes ±Inf
+# and NaN. The Float32 bits of floatmax(T) fold to a constant.
+@inline function exceeds_floatmax(::Type{T}, x::Float32) where T<:Microfloat
+    max_mag = reinterpret(UInt8, floatmax(T)) & ~sign_mask(T)
+    return max_mag, reinterpret(UInt32, abs(x)) > reinterpret(UInt32, cvt_generic(Float32, floatmax(T)))
+end
+
+@inline overflows_to_sentinel(mode::RoundingMode, policy::OverflowPolicy, neg::Bool) =
+    policy isa Overflowing && mode_overflows_to_inf(mode, neg)
+
+# Whether the generic path would throw for `x`, as a branch-free Bool. Folds
+# to `false` for formats that cannot fail (signed, with NaN), which leaves
+# `cvt_twiddle` without branches.
+@inline function twiddle_fails(::Type{T}, x::Float32, mode::RoundingMode,
+                               policy::OverflowPolicy) where T<:Microfloat
+    _, over = exceeds_floatmax(T, x)
+    return (sign_bits(T) == 0 && signbit(x)) | (!hasnan(T) && isnan(x)) |
+           (!hasinf(T) && !hasnan(T) && over && overflows_to_sentinel(mode, policy, signbit(x)))
+end
+
+# Raises the error the generic path raises for `x`, in the same order.
+@noinline function throw_twiddle_error(::Type{T}, x::Float32, mode::RoundingMode,
+                                       policy::OverflowPolicy) where T<:Microfloat
+    sign_bits(T) == 0 && signbit(x) && throw_negative_unsigned(T, x)
+    !hasnan(T) && isnan(x) && throw_no_nan(T, x)
+    throw_no_overflow_sentinel(T, x)
+end
+
+# The result bits of `cvt_twiddle` for an `x` that does not fail.
+@inline function twiddle_bits(::Type{T}, x::Float32, mode::TwiddledModes,
+                              policy::OverflowPolicy) where T<:Microfloat
+    M, bias = significand_bits(T), exponent_bias(T)
+    a = reinterpret(UInt32, x) & 0x7fffffff
+    neg = signbit(x)
+    isnan_x = a > 0x7f800000
+    max_mag, over = exceeds_floatmax(T, x)
+    sentinel = overflows_to_sentinel(mode, policy, neg)
+
+    # Target normals: round at the target's last significand bit, rebias.
+    rebias = UInt32(127 - bias) << M
+    t = if M > 0
+        normal = round_shift(a, 23 - M, mode, neg) - rebias
+        # Below floatmin(T), count units of the smallest subnormal, 2^(1-bias-M).
+        scale = reinterpret(Float32, pow2_bits(M + bias - 1))
+        sub = round_int(abs(x) * scale, mode, neg)
+        ifelse(a < pow2_bits(1 - bias), sub, normal)
+    else
+        # Without significand bits there are no subnormals and no zero: the
+        # all-zero encoding 2^-bias is the smallest value, and everything
+        # below it maps to it. It may lie below Float32's normals (E8M0's
+        # 2^-127), so Float32 subnormals are scaled to normals first.
+        # The generic path's ties-to-even reads the implicit leading one as
+        # the last significand bit here, so its ties round away.
+        f32_sub = a < 0x00800000
+        a_normal = ifelse(f32_sub, reinterpret(UInt32, abs(x) * Float32(0x1p24)), a)
+        m = mode isa RoundingMode{:Nearest} ? RoundNearestTiesAway : mode
+        normal = round_shift(a_normal, 23, m, neg) - ifelse(f32_sub, rebias + 0x18, rebias)
+        ifelse(a < pow2_bits(-bias), 0x00000000, normal)
+    end
+
+    # Overflow, then the sign; NaN results carry no sign, like `nan(T)`.
+    ovf_mag = if !(policy isa Overflowing)
+        max_mag
+    elseif hasinf(T)
+        ifelse(sentinel, reinterpret(UInt8, inf(T)), max_mag)
+    elseif hasnan(T)
+        ifelse(sentinel, reinterpret(UInt8, nan(T)), max_mag)
+    else
+        max_mag
+    end
+    r = ifelse(over, ovf_mag, t % UInt8)
+    sign_bits(T) == 1 && (r |= ifelse(neg, sign_mask(T), 0x00))
+    if hasnan(T)
+        nan_result = isnan_x | (over & sentinel & !hasinf(T))
+        r = ifelse(nan_result, reinterpret(UInt8, nan(T)), r)
+    end
+    return reinterpret(T, r)
+end
+
+cvt_twiddle(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt_generic(T, x, mode, policy)
+
 # ───────────────────────── conversion funnel ──────────────────────────
 
 """
@@ -267,7 +403,7 @@ overlay method tables would recurse into the override itself).
 @inline cvt(::Type{T}, x::Real, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt(T, Float32(x), mode, policy)
 @inline cvt(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
-    cvt_generic(T, x, mode, policy)
+    cvt_twiddle(T, x, mode, policy)
 @inline cvt(::Type{T}, x::Microfloat, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt_generic(T, Float32(x), mode, policy)
 

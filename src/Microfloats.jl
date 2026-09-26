@@ -19,7 +19,7 @@ export Microfloat
 include("conversion.jl")
 @public overflow_policy
 @public SAT, OVF
-@public cvt, cvt_generic, WideFloat, max_twiddle_cost
+@public cvt, cvt_generic, cvt_twiddle, WideFloat, max_twiddle_cost
 
 include("macro.jl")
 export @microfloat

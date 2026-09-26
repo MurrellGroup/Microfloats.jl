@@ -40,7 +40,7 @@
 # the device. NaN payloads are the one hardware-defined part.
 
 using Microfloats
-using Microfloats: Microfloat, cvt, cvt_generic, cvt_lanes,
+using Microfloats: Microfloat, cvt, cvt_generic, cvt_twiddle, cvt_lanes,
                    OverflowPolicy, Saturating, BFloat16, bitwidth,
                    throw_negative_unsigned, throw_no_nan,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
@@ -213,7 +213,7 @@ end
     (any(signbit, xs) && throw_negative_unsigned(T, xs); nothing)
 
 # A source without a native form still reaches the Float32 native.
-@inline scalar_fallback(::Type{T}, x::Float32, mode, policy) where T = cvt_generic(T, x, mode, policy)
+@inline scalar_fallback(::Type{T}, x::Float32, mode, policy) where T = cvt_twiddle(T, x, mode, policy)
 @inline scalar_fallback(::Type{T}, x, mode, policy) where T = cvt(T, Float32(x), mode, policy)
 
 # (target, PTX type, nibble pairs, guard, modes, (source, PTX source, gate)...)
