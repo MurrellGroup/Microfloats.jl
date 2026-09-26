@@ -176,6 +176,22 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         @test isempty(bad)
     end
 
+    @testset "BFloat16 sources, every bit pattern" begin
+        # x86 without native BFloat16 once lost the sign here: LLVM read the
+        # sign bit from a bitcast of the bfloat, which its backend miscompiles.
+        widen32(x::BFloat16) = reinterpret(Float32, UInt32(reinterpret(UInt16, x)) << 16)
+        bad = []
+        for T in TYPES_BUILTIN, u in 0x0000:0xffff
+            x = reinterpret(BFloat16, u)
+            # skip the inputs that throw (slow), which other tests cover
+            (isnan(x) && !Microfloats.hasnan(T)) && continue
+            (signbit(x) && sign_bits(T) == 0) && continue
+            T(x; overflow=Microfloats.SAT) === cvt_generic(T, widen32(x), RoundNearest, Microfloats.SAT) ||
+                push!(bad, (T, x))
+        end
+        @test isempty(bad)
+    end
+
     @testset "error hooks" begin
         @test_throws DomainError Float8_E8M0FNU(-1.0)
         @test_throws DomainError Float8_E8M0FNU(-0.0)

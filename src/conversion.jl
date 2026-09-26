@@ -404,6 +404,13 @@ overlay method tables would recurse into the override itself).
     cvt(T, Float32(x), mode, policy)
 @inline cvt(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt_twiddle(T, x, mode, policy)
+# BFloat16 widens through its bits rather than `fpext`. On x86 without native
+# BFloat16 (LLVM 16, Julia 1.11), once a bfloat is both extended and bitcast
+# to i16, the bitcast reads the low half of the extended register, which is
+# zero: inlined into `cvt_twiddle`, whose sign LLVM takes from that bitcast,
+# the sign of every result was lost.
+@inline cvt(::Type{T}, x::BFloat16, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt(T, reinterpret(Float32, UInt32(reinterpret(UInt16, x)) << 16), mode, policy)
 @inline cvt(::Type{T}, x::Microfloat, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt_generic(T, Float32(x), mode, policy)
 
