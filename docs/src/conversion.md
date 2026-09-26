@@ -32,6 +32,7 @@ julia> cvt(Float32, Float8_E4M3FN(1.5))
 ```@docs
 Microfloats.cvt
 Microfloats.cvt_generic
+Microfloats.cvt_twiddle
 Microfloats.cvt_lanes
 Microfloats.WideFloat
 ```
@@ -87,14 +88,44 @@ Optimized implementations are ordinary methods on the funnel, chosen by
 dispatch:
 
 1. [`Microfloats.cvt_generic`](@ref) is the bit-level reference path.
-2. [`Microfloats.@cvt_table`](@ref) registers a lookup table for one pair of
-   microfloat types. Every built-in pair has one.
-3. Hand-written methods, such as the exact `Float4_E2M1FN` to `Float8_E4M3FN`
-   widening, which also converts packed storage to packed storage directly.
+   [`Microfloats.cvt_twiddle`](@ref) computes the same results branch-free and
+   is the default for `Float32` sources, and so for every source that
+   converts to `Float32` first.
+2. [`Microfloats.@cvt_table`](@ref) compiles the generic results for one pair
+   of microfloat types into a bit-twiddle or a lookup table. Every built-in
+   pair has one.
+3. Hand-written methods.
 4. Device overrides in package extensions.
+
+`@cvt_table` runs every source bit pattern through the generic path and fits
+the results with linear pieces `(i << k) + c` over the source bits `i`. Exact
+widenings, such as `Float4_E2M1FN` to `Float8_E4M3FN`, are one piece over the
+source normals and one per binade of source subnormals; saturated and NaN
+results are constant pieces. A combination with few pieces becomes a
+branch-free twiddle, which vectorizes and so also serves packed sources and
+destinations of any length:
+
+```julia
+# Float4_E2M1FN => Float8_E4M3FN, any rounding mode and overflow policy
+i = reinterpret(UInt8, x) & 0x07
+t = ifelse(i >= 0x02, (i << 2) + 0x30, ifelse(i >= 0x01, (i << 3) + 0x28, 0x00))
+t |= (reinterpret(UInt8, x) & 0x08) << 4
+```
+
+Everything else is a lookup. [`Microfloats.max_twiddle_cost`](@ref) sets the
+cutoff; the CUDA extension lowers it, since on the device a cached table load
+beats all but the shortest twiddles.
+
+Widening is generated the same way, without registration: `@microfloat` fits
+the conversions of each new type into `Float16`, `BFloat16` and `Float32` over
+the destination's bits. Normals are one linear piece. Zero and all subnormals
+share one piece evaluated on the FPU: the subnormal significand placed under
+the exponent of ``2^{1-\text{bias}}``, minus ``2^{1-\text{bias}}``, is the
+exact value, normalized. `Float64` extends the `Float32` result.
 
 ```@docs
 Microfloats.@cvt_table
+Microfloats.max_twiddle_cost
 ```
 
 ## CUDA
@@ -117,6 +148,6 @@ path otherwise. The choice is made when the kernel is compiled.
 
 Hardware narrowing always saturates, so native narrowing applies to the `SAT`
 policy with `RoundNearest` (or the two listed modes for `Float8_E8M0FNU`);
-everything else takes the generic path. Vector forms use one instruction per
-two lanes for any even `N`. Native and generic results agree bit for bit,
+everything else takes the branch-free `cvt_twiddle` path. Vector forms use
+one instruction per two lanes for any even `N`. Native and generic results agree bit for bit,
 apart from NaN payloads.

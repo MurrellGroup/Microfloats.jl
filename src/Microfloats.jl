@@ -19,7 +19,7 @@ export Microfloat
 include("conversion.jl")
 @public overflow_policy
 @public SAT, OVF
-@public cvt, cvt_generic, WideFloat
+@public cvt, cvt_generic, cvt_twiddle, WideFloat, max_twiddle_cost
 
 include("macro.jl")
 export @microfloat
@@ -33,7 +33,6 @@ export Float4_E2M1FN
 include("vectorization.jl")
 @public cvt_lanes
 
-include("specializations.jl")
 @public Float16x2, Float16x4
 @public BFloat16x2, BFloat16x4
 @public Float8x2_E4M3FN, Float8x4_E4M3FN
