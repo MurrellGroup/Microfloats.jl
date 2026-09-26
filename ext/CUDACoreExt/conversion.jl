@@ -207,10 +207,13 @@ end
 # The generic path throws where the hardware would silently produce a value:
 # NaN into a format without NaN, negative input into an unsigned format.
 @inline guard(::Val{:none}, ::Type{T}, xs) where T = nothing
+# The lanes reduce with `|` rather than `any`, which is not unrolled over a
+# tuple: it spills the lanes to local memory and loops, costing more than
+# the conversion itself.
 @inline guard(::Val{:nan}, ::Type{T}, xs) where T =
-    (any(isnan, xs) && throw_no_nan(T, xs); nothing)
+    (reduce(|, map(isnan, xs)) && throw_no_nan(T, xs); nothing)
 @inline guard(::Val{:sign}, ::Type{T}, xs) where T =
-    (any(signbit, xs) && throw_negative_unsigned(T, xs); nothing)
+    (reduce(|, map(signbit, xs)) && throw_negative_unsigned(T, xs); nothing)
 
 # A source without a native form still reaches the Float32 native.
 @inline scalar_fallback(::Type{T}, x::Float32, mode, policy) where T = cvt_twiddle(T, x, mode, policy)
