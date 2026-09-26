@@ -238,6 +238,142 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
     return apply_overflow_policy(reinterpret(T, t_raw), x, mode, policy)
 end
 
+# ───────────────────────── branch-free narrowing ──────────────────────────
+
+# Whether a directed mode rounds the magnitude up, for a value of sign `neg`.
+@inline rounds_up(::RoundingMode{:ToZero},   ::Bool) = false
+@inline rounds_up(::RoundingMode{:FromZero}, ::Bool) = true
+@inline rounds_up(::RoundingMode{:Up},   neg::Bool) = !neg
+@inline rounds_up(::RoundingMode{:Down}, neg::Bool) = neg
+
+# `a >> s` rounded per mode. On the bits of a positive Float32 this rounds
+# its significand, carrying into the exponent.
+@inline round_shift(a::UInt32, s::Int, ::RoundingMode{:Nearest}, ::Bool) =
+    (a + ((UInt32(1) << (s - 1)) - 0x1) + ((a >> s) & 0x1)) >> s
+@inline round_shift(a::UInt32, s::Int, ::RoundingMode{:NearestTiesAway}, ::Bool) =
+    (a + (UInt32(1) << (s - 1))) >> s
+@inline round_shift(a::UInt32, s::Int, mode::RoundingMode, neg::Bool) =
+    (a + ifelse(rounds_up(mode, neg), (UInt32(1) << s) - 0x1, UInt32(0))) >> s
+
+# `v ≥ 0`, below 2^8, rounded per mode to an integer. Nearest adds 2^23, which
+# leaves no fraction bits, so the FPU's own ties-to-even rounding applies.
+@inline round_int(v::Float32, ::RoundingMode{:Nearest}, ::Bool) =
+    reinterpret(UInt32, v + Float32(0x1p23)) - 0x4b000000
+@inline round_int(v::Float32, ::RoundingMode{:NearestTiesAway}, ::Bool) =
+    unsafe_trunc(UInt32, round(v, RoundNearestTiesAway))
+@inline round_int(v::Float32, mode::RoundingMode, neg::Bool) =
+    unsafe_trunc(UInt32, ifelse(rounds_up(mode, neg), ceil(v), v))
+
+# Bits of the Float32 equal to `2^e`, for e ≥ -149.
+@inline pow2_bits(e::Int) = e >= -126 ? UInt32(e + 127) << 23 : UInt32(1) << (e + 149)
+
+const TwiddledModes = Union{RoundingMode{:Nearest}, RoundingMode{:NearestTiesAway},
+                            RoundingMode{:ToZero}, RoundingMode{:FromZero},
+                            RoundingMode{:Up}, RoundingMode{:Down}}
+
+"""
+    cvt_twiddle(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) -> T
+
+Branch-free narrowing from `Float32`, the default [`cvt`](@ref) method for
+`Float32` sources (and so for every source that converts to `Float32`
+first). Results, and errors, are identical to [`cvt_generic`](@ref), which
+it calls for modes it does not cover.
+
+Target normals round the `Float32` bits directly: an integer add rounds the
+significand at the target's last significand bit, carrying into the
+exponent, and a subtraction rebiases. Target subnormals round `|x|` scaled
+to units of the smallest subnormal, which the FPU does exactly. Everything
+else is a select, so the only branches are the error checks, which the
+compiler removes for formats that cannot fail (e.g. signed formats with NaN).
+"""
+@inline function cvt_twiddle(::Type{T}, x::Float32, mode::TwiddledModes,
+                             policy::OverflowPolicy) where T<:Microfloat
+    twiddle_fails(T, x, mode, policy) && throw_twiddle_error(T, x, mode, policy)
+    return twiddle_bits(T, x, mode, policy)
+end
+
+# The magnitude of floatmax(T) and whether |x| exceeds it, which includes ±Inf
+# and NaN. The Float32 bits of floatmax(T) fold to a constant.
+@inline function exceeds_floatmax(::Type{T}, x::Float32) where T<:Microfloat
+    max_mag = reinterpret(UInt8, floatmax(T)) & ~sign_mask(T)
+    return max_mag, reinterpret(UInt32, abs(x)) > reinterpret(UInt32, cvt_generic(Float32, floatmax(T)))
+end
+
+@inline overflows_to_sentinel(mode::RoundingMode, policy::OverflowPolicy, neg::Bool) =
+    policy isa Overflowing && mode_overflows_to_inf(mode, neg)
+
+# Whether the generic path would throw for `x`, as a branch-free Bool. Folds
+# to `false` for formats that cannot fail (signed, with NaN), which leaves
+# `cvt_twiddle` without branches.
+@inline function twiddle_fails(::Type{T}, x::Float32, mode::RoundingMode,
+                               policy::OverflowPolicy) where T<:Microfloat
+    _, over = exceeds_floatmax(T, x)
+    return (sign_bits(T) == 0 && signbit(x)) | (!hasnan(T) && isnan(x)) |
+           (!hasinf(T) && !hasnan(T) && over && overflows_to_sentinel(mode, policy, signbit(x)))
+end
+
+# Raises the error the generic path raises for `x`, in the same order.
+@noinline function throw_twiddle_error(::Type{T}, x::Float32, mode::RoundingMode,
+                                       policy::OverflowPolicy) where T<:Microfloat
+    sign_bits(T) == 0 && signbit(x) && throw_negative_unsigned(T, x)
+    !hasnan(T) && isnan(x) && throw_no_nan(T, x)
+    throw_no_overflow_sentinel(T, x)
+end
+
+# The result bits of `cvt_twiddle` for an `x` that does not fail.
+@inline function twiddle_bits(::Type{T}, x::Float32, mode::TwiddledModes,
+                              policy::OverflowPolicy) where T<:Microfloat
+    M, bias = significand_bits(T), exponent_bias(T)
+    a = reinterpret(UInt32, x) & 0x7fffffff
+    neg = signbit(x)
+    isnan_x = a > 0x7f800000
+    max_mag, over = exceeds_floatmax(T, x)
+    sentinel = overflows_to_sentinel(mode, policy, neg)
+
+    # Target normals: round at the target's last significand bit, rebias.
+    rebias = UInt32(127 - bias) << M
+    t = if M > 0
+        normal = round_shift(a, 23 - M, mode, neg) - rebias
+        # Below floatmin(T), count units of the smallest subnormal, 2^(1-bias-M).
+        scale = reinterpret(Float32, pow2_bits(M + bias - 1))
+        sub = round_int(abs(x) * scale, mode, neg)
+        ifelse(a < pow2_bits(1 - bias), sub, normal)
+    else
+        # Without significand bits there are no subnormals and no zero: the
+        # all-zero encoding 2^-bias is the smallest value, and everything
+        # below it maps to it. It may lie below Float32's normals (E8M0's
+        # 2^-127), so Float32 subnormals are scaled to normals first.
+        # The generic path's ties-to-even reads the implicit leading one as
+        # the last significand bit here, so its ties round away.
+        f32_sub = a < 0x00800000
+        a_normal = ifelse(f32_sub, reinterpret(UInt32, abs(x) * Float32(0x1p24)), a)
+        m = mode isa RoundingMode{:Nearest} ? RoundNearestTiesAway : mode
+        normal = round_shift(a_normal, 23, m, neg) - ifelse(f32_sub, rebias + 0x18, rebias)
+        ifelse(a < pow2_bits(-bias), 0x00000000, normal)
+    end
+
+    # Overflow, then the sign; NaN results carry no sign, like `nan(T)`.
+    ovf_mag = if !(policy isa Overflowing)
+        max_mag
+    elseif hasinf(T)
+        ifelse(sentinel, reinterpret(UInt8, inf(T)), max_mag)
+    elseif hasnan(T)
+        ifelse(sentinel, reinterpret(UInt8, nan(T)), max_mag)
+    else
+        max_mag
+    end
+    r = ifelse(over, ovf_mag, t % UInt8)
+    sign_bits(T) == 1 && (r |= ifelse(neg, sign_mask(T), 0x00))
+    if hasnan(T)
+        nan_result = isnan_x | (over & sentinel & !hasinf(T))
+        r = ifelse(nan_result, reinterpret(UInt8, nan(T)), r)
+    end
+    return reinterpret(T, r)
+end
+
+cvt_twiddle(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
+    cvt_generic(T, x, mode, policy)
+
 # ───────────────────────── conversion funnel ──────────────────────────
 
 """
@@ -267,7 +403,7 @@ overlay method tables would recurse into the override itself).
 @inline cvt(::Type{T}, x::Real, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt(T, Float32(x), mode, policy)
 @inline cvt(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
-    cvt_generic(T, x, mode, policy)
+    cvt_twiddle(T, x, mode, policy)
 @inline cvt(::Type{T}, x::Microfloat, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
     cvt_generic(T, Float32(x), mode, policy)
 
@@ -451,8 +587,12 @@ overflow policy. `Float16` has a narrower exponent range than some formats
 (`Float8_E8M0FNU`); it receives the exact `Float32` value rounded by
 `Float16(::Float32)`.
 
-Like the narrowing form this is the extension surface for device backends,
-which override it for the destinations their hardware widens to natively.
+`@microfloat` registers a method per type that computes it with a
+branch-free bit-twiddle over the destination's bits where one is cheap (see
+[`max_twiddle_cost`](@ref)), and with the generic lookup otherwise; `Float64`
+extends the `Float32` result. Like the narrowing form this is the extension
+surface for device backends, which override it for the destinations their
+hardware widens to natively.
 """
 @inline cvt(::Type{F}, x::Microfloat) where F<:WideFloat = cvt_generic(F, x)
 
@@ -493,44 +633,221 @@ Base.Rational{BigInt}(x::Microfloat) = Rational{BigInt}(cvt(Float32, x))
 
 # ───────────────────────── @cvt_table ──────────────────────────
 
-# Generator backend for `@cvt_table`: builds the complete raw-bits lookup
-# table for one (Dst, Src, mode, policy) combination by running every
-# possible source bit pattern through `cvt_generic`, so the table is correct
-# by construction. If any entry throws (e.g. negative source values into an
-# unsigned target), the whole combination falls back to the runtime generic
-# path so error behavior is preserved exactly.
-function table_cvt_expr(::Type{T}, ::Type{S}, ::Type{M}, ::Type{P}
-                        ) where {T<:Microfloat, S<:Microfloat, M<:RoundingMode, P<:OverflowPolicy}
-    mode, policy = M.instance, P.instance
-    n = 1 << bitwidth(S)
-    vals = UInt8[]
-    for raw in UInt8(0):UInt8(n - 1)
+# Raw result bits of `cvt_generic` for every `S` bit pattern, so anything
+# generated from it is correct by construction. `nothing` if any pattern
+# throws (e.g. negative values into an unsigned target): the combination then
+# keeps the runtime generic path, and its errors.
+function cvt_generic_table(::Type{T}, ::Type{S}, mode::RoundingMode, policy::OverflowPolicy
+                           ) where {T<:Microfloat, S<:Microfloat}
+    table = UInt8[]
+    for raw in 0:(1 << bitwidth(S)) - 1
         y = try
-            cvt_generic(T, Float32(reinterpret(S, raw)), mode, policy)
+            cvt_generic(T, Float32(reinterpret(S, raw % UInt8)), mode, policy)
         catch
-            return :($cvt_generic($T, Float32(x), mode, policy))
+            return nothing
         end
-        push!(vals, reinterpret(UInt8, y))
+        push!(table, reinterpret(UInt8, y))
     end
-    table = Tuple(vals)
-    mask = UInt8(n - 1)
-    return :(reinterpret($T, $table[Int(reinterpret(UInt8, x) & $mask) + 1]))
+    return table
+end
+
+# Conversion tables are mostly piecewise linear in their index. An exact
+# widening is one linear piece over the source normals (a fixed exponent
+# offset added to the shifted bits, carries between exponent and significand
+# included), plus a piece per binade of source subnormals that the target
+# normalizes; saturated and NaN results are constant runs. A piece
+# `(lo, a, c)` maps each index `i` from `lo` up to the next piece to
+# `a * i + c` in the table's unsigned arithmetic, with `a` zero or a power of
+# two, so it costs a shift and an add. Returns the fewest pieces covering
+# `table`, whose first index is `first`.
+function linear_pieces(table::AbstractVector{U}, first::Int = 0) where U<:Unsigned
+    n = length(table)
+    # The piece starting at index `i` (1-based) takes its slope from its
+    # first two entries and extends as far as they predict: `stop[i]`.
+    stop = Vector{Int}(undef, n)
+    piece = Vector{Tuple{Int,U,U}}(undef, n)
+    for i in 1:n
+        k = U(first + i - 1)
+        a = i < n ? table[i + 1] - table[i] : zero(U)
+        iszero(a) || ispow2(a) || (a = zero(U))
+        c = table[i] - a * k
+        j = i
+        while j < n && a * U(first + j) + c == table[j + 1]
+            j += 1
+        end
+        stop[i], piece[i] = j, (first + i - 1, a, c)
+    end
+    # Fewest pieces for each prefix, then walk back from the full table.
+    count = fill(typemax(Int), n + 1)
+    from = zeros(Int, n + 1)
+    count[1] = 0
+    for i in 1:n, j in i:stop[i]
+        if count[i] + 1 < count[j + 1]
+            count[j + 1], from[j + 1] = count[i] + 1, i
+        end
+    end
+    pieces = Tuple{Int,U,U}[]
+    j = n + 1
+    while j > 1
+        pushfirst!(pieces, piece[from[j]])
+        j = from[j]
+    end
+    return pieces
+end
+
+function piece_expr(i::Symbol, (_, a, c)::Tuple{Int,U,U}) where U
+    iszero(a) && return c
+    ai = isone(a) ? i : :($i << $(trailing_zeros(a)))
+    return iszero(c) ? ai : :($ai + $c)
+end
+
+"""
+    max_twiddle_cost() -> Int
+
+Largest cost of a bit-twiddle that generated conversion methods (see
+[`@cvt_table`](@ref)) prefer over a table lookup: its pieces, plus one if it
+moves a sign bit. Each piece is a shift, an add, a compare and a select. On
+CPUs the twiddle vectorizes where a lookup is a gather, and wins by a wide
+margin up to about twice this many pieces. Device backends override it: on
+GPUs a load from a small constant table hits the read-only cache and beats
+all but the shortest twiddles.
+"""
+max_twiddle_cost() = 8
+
+# A bit-twiddle computing a conversion table of `U` results from the source
+# bits: the index `i` is the source bits under `mask`. Indices below `head`
+# take a head expression (see `widen_subnormal`), the rest `pieces`. When
+# `shift` is not `nothing`, the index is the magnitude and the source sign
+# bit moves `shift` bits up.
+struct Twiddle{U<:Unsigned}
+    pieces::Vector{Tuple{Int,U,U}}
+    mask::UInt8
+    shift::Union{Int,Nothing}
+    head::Int
+end
+
+twiddle_cost(tw::Twiddle) = length(tw.pieces) + (tw.head > 0) + (tw.shift !== nothing)
+
+# The cheapest twiddle for the table of `S` conversions into a format whose
+# sign bit is `sign` (`nothing` if unsigned). The whole table always fits;
+# when the sign moves across unchanged, the magnitude half alone usually fits
+# in fewer pieces. `head` is `(n, f)` if `f(i)` computes the first `n`
+# magnitudes by other means; it is used where it matches the table.
+function twiddle_fit(table::Vector{U}, ::Type{S}, sign::Union{Int,Nothing};
+                     head = nothing) where {U<:Unsigned, S<:Microfloat}
+    n = length(table)
+    candidates = [Twiddle{U}(linear_pieces(table), UInt8(n - 1), nothing, 0)]
+    magnitude(h, shift) = if head !== nothing && head[1] < h &&
+                             all(head[2](i) == table[i + 1] for i in 0:head[1] - 1)
+        Twiddle{U}(linear_pieces(table[head[1] + 1:h], head[1]), UInt8(h - 1), shift, head[1])
+    else
+        Twiddle{U}(linear_pieces(table[1:h]), UInt8(h - 1), shift, 0)
+    end
+    if sign_bits(S) == 0
+        push!(candidates, magnitude(n, nothing))
+    elseif sign !== nothing
+        h = n >> 1
+        if all(table[h + m + 1] == table[m + 1] | (one(U) << sign) for m in 0:h - 1)
+            push!(candidates, magnitude(h, sign - (bitwidth(S) - 1)))
+        end
+    end
+    return argmin(twiddle_cost, candidates)
+end
+
+# Branch-free evaluation of a twiddle on `x::S`: every piece is computed and
+# the last one starting at or below the index is selected, which vectorizes
+# where a table lookup would be a gather.
+function twiddle_expr(tw::Twiddle{U}, ::Type{S}, head_expr = nothing) where {U, S}
+    ex = tw.head > 0 ? head_expr : piece_expr(:i, tw.pieces[1])
+    for p in (tw.head > 0 ? tw.pieces : tw.pieces[2:end])
+        ex = :(ifelse(i >= $(U(p[1])), $(piece_expr(:i, p)), $ex))
+    end
+    body = :(raw = reinterpret(UInt8, x); i = $U(raw & $(tw.mask)); t = $ex)
+    if tw.shift !== nothing
+        s = :($U(raw & $(sign_mask(S))))
+        push!(body.args, :(t |= $(tw.shift >= 0 ? :($s << $(tw.shift)) : :($s >> $(-tw.shift)))))
+    end
+    push!(body.args, :t)
+    return body
+end
+
+# Where both a twiddle and a lookup are candidates, the choice is
+# `max_twiddle_cost()`, which folds when the method is compiled, so device
+# overlays can pick differently than the host. Beyond twice the host default
+# a lookup wins everywhere.
+function twiddle_or(lookup, tw::Twiddle, twiddle)
+    cost = twiddle_cost(tw)
+    cost > 2 * max_twiddle_cost() && return lookup
+    return :($cost <= $max_twiddle_cost() ? $twiddle : $lookup)
+end
+
+# The cheapest correct code for one (T, S, mode, policy) combination: a
+# bit-twiddle when the generic results are piecewise linear in few pieces, a
+# `2^bitwidth(S)`-entry lookup otherwise.
+function cvt_expr(::Type{T}, ::Type{S}, ::Type{M}, ::Type{P}
+                  ) where {T<:Microfloat, S<:Microfloat, M<:RoundingMode, P<:OverflowPolicy}
+    table = cvt_generic_table(T, S, M.instance, P.instance)
+    table === nothing && return :($cvt_generic($T, Float32(x), mode, policy))
+    lookup = :(reinterpret($T, $(Tuple(table))[Int(reinterpret(UInt8, x) & $(UInt8(length(table) - 1))) + 1]))
+    tw = twiddle_fit(table, S, sign_bits(T) == 1 ? bitwidth(T) - 1 : nothing)
+    return twiddle_or(lookup, tw, :(reinterpret($T, $(twiddle_expr(tw, S)))))
+end
+
+# ───────────────────────── generated widening ──────────────────────────
+
+wide_bits(::Type{F}) where F<:WideFloat = Base.uinttype(F)
+wide_bits(::Type{BFloat16}) = UInt16
+
+# Zero and the subnormals of `S`, widened to the bits of `F` through the
+# FPU: under the exponent of 2^(1-bias), the significand bits `i` read as
+# 2^(1-bias) * (1 + i/2^M), and subtracting 2^(1-bias) leaves exactly
+# i * 2^(1-bias-M), normalized. No operand is subnormal. One head piece in
+# place of a linear piece per binade of subnormals.
+@inline function widen_subnormal(::Type{F}, ::Type{S}, i) where {F<:Union{Float16,BFloat16,Float32}, S<:Microfloat}
+    magic = UInt32(1 - exponent_bias(S) + 127) << 23
+    v = reinterpret(Float32, (UInt32(i) << (23 - significand_bits(S))) | magic) - reinterpret(Float32, magic)
+    F === Float16 && return reinterpret(UInt16, Float16(v))
+    F === BFloat16 && return (reinterpret(UInt32, v) >> 16) % UInt16
+    return reinterpret(UInt32, v)
+end
+
+# Widening of `S` to `F`, generated per type by `@microfloat`: a bit-twiddle
+# over the bits of `F` when the generic results allow a cheap one, else the
+# generic lookup. Float64 extends the Float32 result, one instruction, which
+# beats a twiddle on 64-bit lanes (half as many per vector).
+function widen_expr(::Type{F}, ::Type{S}) where {F<:WideFloat, S<:Microfloat}
+    F === Float64 && return :(Float64($cvt(Float32, x)))
+    U = wide_bits(F)
+    table = [reinterpret(U, cvt_generic(F, reinterpret(S, raw % UInt8))) for raw in 0:(1 << bitwidth(S)) - 1]
+    head = significand_bits(S) > 0 ? (1 << significand_bits(S), i -> widen_subnormal(F, S, i)) : nothing
+    tw = twiddle_fit(table, S, 8 * sizeof(U) - 1; head)
+    twiddle = :(reinterpret($F, $(twiddle_expr(tw, S, :($widen_subnormal($F, $S, i))))))
+    return twiddle_or(:($cvt_generic($F, x)), tw, twiddle)
 end
 
 """
     @cvt_table Src => Dst
 
-Register an optimized lookup-table method on the conversion funnel
-[`cvt`](@ref) for converting microfloat `Src` values to microfloat `Dst`.
+Register an optimized method on the conversion funnel [`cvt`](@ref) for
+converting microfloat `Src` values to microfloat `Dst`.
 
-Expands to a `@generated` method of `Microfloats.cvt` whose lookup table is
-computed lazily — once per `(mode, policy)` combination actually used — by
-running every `Src` bit pattern through [`cvt_generic`](@ref), so results
-are identical to the generic path but cost a single `2^bitwidth(Src)`-entry
-table lookup. Combinations where the generic path throws (e.g. signed
-source into unsigned target) keep the runtime path and its errors.
+Expands to a `@generated` method of `Microfloats.cvt`. Once per
+`(mode, policy)` combination actually used, it runs every `Src` bit pattern
+through [`cvt_generic`](@ref) and compiles the resulting table into the
+cheapest equivalent code, so results are identical to the generic path:
 
-Invoke *after* both types are defined. Microfloats registers tables for all
+- a branch-free bit-twiddle when the table is piecewise linear in a few
+  pieces, as for exact widenings like `Float4_E2M1FN => Float8_E4M3FN`
+  (each piece is a shift and an add, selected by comparing the source bits);
+- otherwise a single `2^bitwidth(Src)`-entry table lookup.
+
+Which counts as "a few" is [`max_twiddle_cost`](@ref), which device
+backends lower.
+
+Combinations where the generic path throws (e.g. signed source into unsigned
+target) keep the runtime path and its errors.
+
+Invoke *after* both types are defined. Microfloats registers methods for all
 pairs of built-in types; user-defined `@microfloat` types can opt in:
 
 ```julia
@@ -539,9 +856,8 @@ Microfloats.@cvt_table MyFloat6 => Float8_E4M3
 Microfloats.@cvt_table Float8_E4M3 => MyFloat6
 ```
 
-To hand-optimize a pair instead (e.g. branch-free bit-twiddling), define
-the `Microfloats.cvt` method for it directly rather than invoking
-`@cvt_table` for that pair.
+To hand-optimize a pair instead, define the `Microfloats.cvt` method for it
+directly rather than invoking `@cvt_table` for that pair.
 """
 macro cvt_table(pair)
     (pair isa Expr && pair.head === :call && pair.args[1] === :(=>)) ||
@@ -550,7 +866,7 @@ macro cvt_table(pair)
     ex = quote
         Base.@generated function $(@__MODULE__).cvt(::Type{$T}, x::$S,
                                                     mode::$RoundingMode, policy::$OverflowPolicy)
-            $table_cvt_expr($T, $S, mode, policy)
+            $cvt_expr($T, $S, mode, policy)
         end
         nothing
     end

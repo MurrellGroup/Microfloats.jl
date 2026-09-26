@@ -98,6 +98,10 @@ macro microfloat(name, kwargs...)
         let strings = Tuple($_shortest_decimal_string(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
             $mod.decimal_string(x::$T) = strings[reinterpret(UInt8, x) + 0x0001]
         end
+        # The generated body names the argument `x`, so it escapes hygiene.
+        Base.@generated function $mod.cvt(::Type{F}, $(esc(:x))::$T) where F<:$WideFloat
+            $widen_expr(F, $(esc(:x)))
+        end
     end
 end
 
