@@ -19,10 +19,10 @@
     # fp6x2 is NVIDIA's container layout: one value per byte, in the low six
     # bits, lane 1 in the low byte (PTX `cvt` puts operand `b` there).
     f6x2 = Microfloats.Float6x2_E2M3FN((Float6_E2M3FN(1), Float6_E2M3FN(-1.5)))
-    @test reinterpret(UInt16, [f6x2])[1] ==
+    @test stored(UInt16, f6x2) ==
           UInt16(reinterpret(UInt8, Float6_E2M3FN(1))) |
           (UInt16(reinterpret(UInt8, Float6_E2M3FN(-1.5))) << 8)
-    @test all(b -> b & 0xc0 == 0, reinterpret(UInt8, [f6x2]))
+    @test all(b -> b & 0xc0 == 0, stored(NTuple{2,UInt8}, f6x2))
 
     # The f8f6f4 MMA container for fp4 (value in the central four bits) is the
     # exact E2M1 -> E2M3 widening, so it is also an SVector of Float6_E2M3FN.
