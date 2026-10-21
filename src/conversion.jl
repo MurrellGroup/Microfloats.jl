@@ -181,7 +181,7 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
         throw_negative_unsigned(T, x)
     end
     # A signed zero keeps its sign; unsigned formats have an empty sign mask.
-    iszero(x) && return reinterpret(T, signbit(x) ? sign_mask(T) : 0x00)
+    iszero(x) && return from_raw_bits(T, signbit(x) ? sign_mask(T) : 0x00)
 
     f32_raw  = reinterpret(UInt32, x)
     f32_exp  = Int((f32_raw >> 23) & UInt32(0x000000ff))
@@ -235,7 +235,7 @@ function _round_to_microfloat(::Type{T}, x::Float32, rshift::F,
 
     t_raw |= (((f32_raw >> 31) % UInt8) << (exponent_bits(T) + significand_bits(T))) & sign_mask(T)
 
-    return apply_overflow_policy(reinterpret(T, t_raw), x, mode, policy)
+    return apply_overflow_policy(from_raw_bits(T, t_raw), x, mode, policy)
 end
 
 # ───────────────────────── branch-free narrowing ──────────────────────────
@@ -295,7 +295,7 @@ end
 # The magnitude of floatmax(T) and whether |x| exceeds it, which includes ±Inf
 # and NaN. The Float32 bits of floatmax(T) fold to a constant.
 @inline function exceeds_floatmax(::Type{T}, x::Float32) where T<:Microfloat
-    max_mag = reinterpret(UInt8, floatmax(T)) & ~sign_mask(T)
+    max_mag = raw_bits(floatmax(T)) & ~sign_mask(T)
     return max_mag, reinterpret(UInt32, abs(x)) > reinterpret(UInt32, cvt_generic(Float32, floatmax(T)))
 end
 
@@ -356,9 +356,9 @@ end
     ovf_mag = if !(policy isa Overflowing)
         max_mag
     elseif hasinf(T)
-        ifelse(sentinel, reinterpret(UInt8, inf(T)), max_mag)
+        ifelse(sentinel, raw_bits(inf(T)), max_mag)
     elseif hasnan(T)
-        ifelse(sentinel, reinterpret(UInt8, nan(T)), max_mag)
+        ifelse(sentinel, raw_bits(nan(T)), max_mag)
     else
         max_mag
     end
@@ -366,9 +366,9 @@ end
     sign_bits(T) == 1 && (r |= ifelse(neg, sign_mask(T), 0x00))
     if hasnan(T)
         nan_result = isnan_x | (over & sentinel & !hasinf(T))
-        r = ifelse(nan_result, reinterpret(UInt8, nan(T)), r)
+        r = ifelse(nan_result, raw_bits(nan(T)), r)
     end
-    return reinterpret(T, r)
+    return from_raw_bits(T, r)
 end
 
 cvt_twiddle(::Type{T}, x::Float32, mode::RoundingMode, policy::OverflowPolicy) where T<:Microfloat =
@@ -469,7 +469,7 @@ cvt_generic(::Type{T}, x::Float32, mode::RoundingMode, ::OverflowPolicy) where T
 # boundary has subnormals flushed to zero on CPUs with native BF16
 # instructions (e.g. Zen 4), which corrupts E8M0's 2^-127.
 function _to_bfloat16_bits(x::T) where {T<:Microfloat}
-    t_raw = reinterpret(UInt8, x)
+    t_raw = raw_bits(x)
 
     t_sign = (sign_bits(T) == 1) && (t_raw & (UInt8(1) << (exponent_bits(T) + significand_bits(T))) != 0)
     t_exponent_field = Int((t_raw >> significand_bits(T)) & UInt8((1 << exponent_bits(T)) - 1))
@@ -649,11 +649,11 @@ function cvt_generic_table(::Type{T}, ::Type{S}, mode::RoundingMode, policy::Ove
     table = UInt8[]
     for raw in 0:(1 << bitwidth(S)) - 1
         y = try
-            cvt_generic(T, Float32(reinterpret(S, raw % UInt8)), mode, policy)
+            cvt_generic(T, Float32(from_raw_bits(S, raw % UInt8)), mode, policy)
         catch
             return nothing
         end
-        push!(table, reinterpret(UInt8, y))
+        push!(table, raw_bits(y))
     end
     return table
 end
@@ -769,7 +769,7 @@ function twiddle_expr(tw::Twiddle{U}, ::Type{S}, head_expr = nothing) where {U, 
     for p in (tw.head > 0 ? tw.pieces : tw.pieces[2:end])
         ex = :(ifelse(i >= $(U(p[1])), $(piece_expr(:i, p)), $ex))
     end
-    body = :(raw = reinterpret(UInt8, x); i = $U(raw & $(tw.mask)); t = $ex)
+    body = :(raw = $raw_bits(x); i = $U(raw & $(tw.mask)); t = $ex)
     if tw.shift !== nothing
         s = :($U(raw & $(sign_mask(S))))
         push!(body.args, :(t |= $(tw.shift >= 0 ? :($s << $(tw.shift)) : :($s >> $(-tw.shift)))))
@@ -795,9 +795,9 @@ function cvt_expr(::Type{T}, ::Type{S}, ::Type{M}, ::Type{P}
                   ) where {T<:Microfloat, S<:Microfloat, M<:RoundingMode, P<:OverflowPolicy}
     table = cvt_generic_table(T, S, M.instance, P.instance)
     table === nothing && return :($cvt_generic($T, Float32(x), mode, policy))
-    lookup = :(reinterpret($T, $(Tuple(table))[Int(reinterpret(UInt8, x) & $(UInt8(length(table) - 1))) + 1]))
+    lookup = :($from_raw_bits($T, $(Tuple(table))[Int($raw_bits(x)) + 1]))
     tw = twiddle_fit(table, S, sign_bits(T) == 1 ? bitwidth(T) - 1 : nothing)
-    return twiddle_or(lookup, tw, :(reinterpret($T, $(twiddle_expr(tw, S)))))
+    return twiddle_or(lookup, tw, :($from_raw_bits($T, $(twiddle_expr(tw, S)))))
 end
 
 # ───────────────────────── generated widening ──────────────────────────
@@ -825,7 +825,7 @@ end
 function widen_expr(::Type{F}, ::Type{S}) where {F<:WideFloat, S<:Microfloat}
     F === Float64 && return :(Float64($cvt(Float32, x)))
     U = wide_bits(F)
-    table = [reinterpret(U, cvt_generic(F, reinterpret(S, raw % UInt8))) for raw in 0:(1 << bitwidth(S)) - 1]
+    table = [reinterpret(U, cvt_generic(F, from_raw_bits(S, raw % UInt8))) for raw in 0:(1 << bitwidth(S)) - 1]
     head = significand_bits(S) > 0 ? (1 << significand_bits(S), i -> widen_subnormal(F, S, i)) : nothing
     tw = twiddle_fit(table, S, 8 * sizeof(U) - 1; head)
     twiddle = :(reinterpret($F, $(twiddle_expr(tw, S, :($widen_subnormal($F, $S, i))))))

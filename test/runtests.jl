@@ -65,6 +65,7 @@ import CUDACore
 
 @testset "Microfloats.jl" begin
     include("basic.jl")
+    include("high_bits.jl")
     include("cvt.jl")
     include("overflow.jl")
     include("floatmin.jl")
