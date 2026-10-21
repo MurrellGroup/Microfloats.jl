@@ -23,7 +23,9 @@
 #      `compute_capability()`, the target's feature set and
 #      `ptx_isa_version()` are compile-time constants under GPUCompiler, so each kernel compiles
 #      to either the native instruction or the generic path, with no runtime
-#      branch.
+#      branch;
+#   3. `max_twiddle_cost`, so `@cvt_table` methods prefer a lookup on device
+#      where the host prefers a bit-twiddle.
 #
 # PTX `cvt` into a sub-byte or 8-bit float format only exists as `.satfinite`,
 # so every native narrowing implements the `SAT` overflow policy; `OVF`
@@ -38,7 +40,7 @@
 # the device. NaN payloads are the one hardware-defined part.
 
 using Microfloats
-using Microfloats: Microfloat, cvt, cvt_generic, cvt_lanes,
+using Microfloats: Microfloat, cvt, cvt_generic, cvt_twiddle, cvt_lanes,
                    OverflowPolicy, Saturating, BFloat16, bitwidth,
                    throw_negative_unsigned, throw_no_nan,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
@@ -205,13 +207,16 @@ end
 # The generic path throws where the hardware would silently produce a value:
 # NaN into a format without NaN, negative input into an unsigned format.
 @inline guard(::Val{:none}, ::Type{T}, xs) where T = nothing
+# The lanes reduce with `|` rather than `any`, which is not unrolled over a
+# tuple: it spills the lanes to local memory and loops, costing more than
+# the conversion itself.
 @inline guard(::Val{:nan}, ::Type{T}, xs) where T =
-    (any(isnan, xs) && throw_no_nan(T, xs); nothing)
+    (reduce(|, map(isnan, xs)) && throw_no_nan(T, xs); nothing)
 @inline guard(::Val{:sign}, ::Type{T}, xs) where T =
-    (any(signbit, xs) && throw_negative_unsigned(T, xs); nothing)
+    (reduce(|, map(signbit, xs)) && throw_negative_unsigned(T, xs); nothing)
 
 # A source without a native form still reaches the Float32 native.
-@inline scalar_fallback(::Type{T}, x::Float32, mode, policy) where T = cvt_generic(T, x, mode, policy)
+@inline scalar_fallback(::Type{T}, x::Float32, mode, policy) where T = cvt_twiddle(T, x, mode, policy)
 @inline scalar_fallback(::Type{T}, x, mode, policy) where T = cvt(T, Float32(x), mode, policy)
 
 # (target, PTX type, nibble pairs, guard, modes, (source, PTX source, gate)...)
@@ -289,3 +294,11 @@ for (T, name, nibbles, destinations) in WIDENING, (H, destination, gate) in dest
         end
     end
 end
+
+# ───────────────────────── @cvt_table methods ──────────────────────────
+
+# A lookup in a small constant table is one load through the read-only cache,
+# which in device code beats a bit-twiddle of more than one linear piece and
+# a sign move. A lone shift, such as Float4_E2M1FN to Float6_E2M3FN, still
+# wins.
+@device_override Microfloats.max_twiddle_cost() = 2

@@ -26,17 +26,11 @@ const BUILTIN_TYPES = (
     :Float4_E2M1FN,
 )
 
-# Register lookup-table `cvt` methods for every ordered pair of built-in
-# types (including identity, which normalizes NaN encodings like the generic
-# path does). Tables are built lazily per (mode, policy) on first use.
-# Pairs with hand-written bit-twiddling methods (specializations.jl) are
-# excluded so the definitions don't collide.
-const TWIDDLED_PAIRS = (
-    (:Float4_E2M1FN, :Float8_E4M3),
-    (:Float4_E2M1FN, :Float8_E4M3FN),
-)
+# Register generated `cvt` methods (bit-twiddles or lookup tables) for every
+# ordered pair of built-in types, including identity, which normalizes NaN
+# encodings like the generic path does. Each is built lazily per
+# (mode, policy) on first use.
 for S in BUILTIN_TYPES, T in BUILTIN_TYPES
-    (S, T) in TWIDDLED_PAIRS && continue
     @eval @cvt_table $S => $T
 end
 
