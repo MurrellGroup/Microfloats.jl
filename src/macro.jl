@@ -92,11 +92,11 @@ macro microfloat(name, kwargs...)
         $mod.float_bits(::Type{$T}) = ($S, $E, $M)
         $mod.non_finite_behavior(::Type{$T}) = $nonfinite_expr
         $mod.overflow_policy(::Type{$T}) = $overflow_expr
-        let lookup = Tuple($_to_bfloat16_bits(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
-            $mod.to_bfloat16_bits(x::$T) = lookup[reinterpret(UInt8, x) + 0x0001]
+        let lookup = Tuple($_to_bfloat16_bits($from_raw_bits($T, i % UInt8)) for i in 0:$(2^N - 1))
+            $mod.to_bfloat16_bits(x::$T) = lookup[$raw_bits(x) + 0x0001]
         end
-        let strings = Tuple($_shortest_decimal_string(reinterpret($T, i % UInt8)) for i in 0:$(2^N - 1))
-            $mod.decimal_string(x::$T) = strings[reinterpret(UInt8, x) + 0x0001]
+        let strings = Tuple($_shortest_decimal_string($from_raw_bits($T, i % UInt8)) for i in 0:$(2^N - 1))
+            $mod.decimal_string(x::$T) = strings[$raw_bits(x) + 0x0001]
         end
         # The generated body names the argument `x`, so it escapes hygiene.
         Base.@generated function $mod.cvt(::Type{F}, $(esc(:x))::$T) where F<:$WideFloat

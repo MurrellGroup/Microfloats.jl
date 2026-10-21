@@ -6,6 +6,10 @@ import Base: signbit, exponent
 Abstract supertype for byte-sized floating-point numbers. Concrete subtypes
 are 8-bit primitive types declared via [`@microfloat`](@ref).
 
+A type narrower than 8 bits keeps its value in the low bits of the byte.
+Operations ignore the bits above, which `reinterpret` can set, and never set
+them themselves. `===` alone still compares the whole byte.
+
 # Examples
 ```jldoctest
 julia> Float8_E4M3 <: Microfloat
@@ -21,13 +25,22 @@ sign_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << sign_bits(T) - 0x01) <
 exponent_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << exponent_bits(T) - 0x01) << significand_bits(T))
 significand_mask(::Type{T}) where T<:Microfloat = UInt8(0x01 << significand_bits(T) - 0x01)
 
-Base.reinterpret(::Type{Unsigned}, x::Microfloat) = reinterpret(UInt8, x)
+value_mask(::Type{T}) where T<:Microfloat = 0xff >> (8 - bitwidth(T))
 
-signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && !iszero(reinterpret(Unsigned, x) & sign_mask(typeof(x)))
+# A microfloat's value is the low `bitwidth(T)` bits of its byte. The bits
+# above it can be set by `reinterpret(T, ::UInt8)`, so every operation reads
+# values through `raw_bits`, which ignores them, and builds values through
+# `from_raw_bits` from bits that fit the width.
+raw_bits(x::T) where T<:Microfloat = reinterpret(UInt8, x) & value_mask(T)
+from_raw_bits(::Type{T}, bits::UInt8) where T<:Microfloat = reinterpret(T, bits)
+
+Base.reinterpret(::Type{Unsigned}, x::Microfloat) = raw_bits(x)
+
+signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && !iszero(raw_bits(x) & sign_mask(typeof(x)))
 function exponent(x::T) where T<:Microfloat
     (isnan(x) || isinf(x)) && throw(DomainError(x, "Cannot be NaN or Inf."))
     iszero(x) && throw(DomainError(x, "Cannot be ±0.0."))
-    raw = reinterpret(Unsigned, x)
+    raw = raw_bits(x)
     biased = Int((raw & exponent_mask(T)) >> significand_bits(T))
     biased == 0 || return biased - exponent_bias(T)
     sig = raw & significand_mask(T)
@@ -107,31 +120,31 @@ Base.floatmax(::Type{T}) where T<:Microfloat = _floatmax(non_finite_behavior(T),
 
 # IEEE
 function _isinf(::Type{IEEE}, x::T) where T<:Microfloat
-    raw = reinterpret(Unsigned, x)
+    raw = raw_bits(x)
     (raw & exponent_mask(T)) == exponent_mask(T) && iszero(raw & significand_mask(T))
 end
 function _isnan(::Type{IEEE}, x::T) where T<:Microfloat
-    raw = reinterpret(Unsigned, x)
+    raw = raw_bits(x)
     (raw & exponent_mask(T)) == exponent_mask(T) && !iszero(raw & significand_mask(T))
 end
-_inf(::Type{IEEE}, ::Type{T}) where T<:Microfloat = reinterpret(T, exponent_mask(T))
+_inf(::Type{IEEE}, ::Type{T}) where T<:Microfloat = from_raw_bits(T, exponent_mask(T))
 _nan(::Type{IEEE}, ::Type{T}) where T<:Microfloat =
-    reinterpret(T, exponent_mask(T) | (UInt8(0x01) << (significand_bits(T) - 1)))
+    from_raw_bits(T, exponent_mask(T) | (UInt8(0x01) << (significand_bits(T) - 1)))
 _floatmax(::Type{IEEE}, ::Type{T}) where T<:Microfloat =
-    reinterpret(T, (exponent_mask(T) - (UInt8(0x01) << significand_bits(T))) | significand_mask(T))
+    from_raw_bits(T, (exponent_mask(T) - (UInt8(0x01) << significand_bits(T))) | significand_mask(T))
 
 # NanOnlyAllOnes
 _isinf(::Type{NanOnlyAllOnes}, ::Microfloat) = false
 function _isnan(::Type{NanOnlyAllOnes}, x::T) where T<:Microfloat
-    raw = reinterpret(Unsigned, x)
+    raw = raw_bits(x)
     (raw & ~sign_mask(T)) == (exponent_mask(T) | significand_mask(T))
 end
 _inf(::Type{NanOnlyAllOnes}, ::Type{T}) where T<:Microfloat =
     throw(DomainError(T, "$T has no Inf"))
 _nan(::Type{NanOnlyAllOnes}, ::Type{T}) where T<:Microfloat =
-    reinterpret(T, exponent_mask(T) | significand_mask(T))
+    from_raw_bits(T, exponent_mask(T) | significand_mask(T))
 _floatmax(::Type{NanOnlyAllOnes}, ::Type{T}) where T<:Microfloat =
-    reinterpret(T, (exponent_mask(T) | significand_mask(T)) - UInt8(0x01))
+    from_raw_bits(T, (exponent_mask(T) | significand_mask(T)) - UInt8(0x01))
 
 # FiniteOnly
 _isinf(::Type{FiniteOnly}, ::Microfloat) = false
@@ -141,7 +154,7 @@ _inf(::Type{FiniteOnly}, ::Type{T}) where T<:Microfloat =
 _nan(::Type{FiniteOnly}, ::Type{T}) where T<:Microfloat =
     throw(DomainError(T, "$T has no NaN"))
 _floatmax(::Type{FiniteOnly}, ::Type{T}) where T<:Microfloat =
-    reinterpret(T, exponent_mask(T) | significand_mask(T))
+    from_raw_bits(T, exponent_mask(T) | significand_mask(T))
 
 # ───────────────────────── generic Base methods ──────────────────────────
 
@@ -150,24 +163,24 @@ Base.typemin(::Type{T}) where T<:Microfloat =
 Base.typemax(::Type{T}) where T<:Microfloat = hasinf(T) ? inf(T) : floatmax(T)
 
 function Base.floatmin(::Type{T}) where T<:Microfloat
-    significand_bits(T) == 0 && return reinterpret(T, 0x00)
+    significand_bits(T) == 0 && return from_raw_bits(T, 0x00)
     bits = UInt8(0x01) << significand_bits(T)
-    hasinf(T) && bits == reinterpret(Unsigned, inf(T)) &&
+    hasinf(T) && bits == raw_bits(inf(T)) &&
         throw(DomainError(T, "$T has no normal values"))
-    return reinterpret(T, bits)
+    return from_raw_bits(T, bits)
 end
 
-Base.zero(::Type{T}) where T<:Microfloat = reinterpret(T, 0x00)
+Base.zero(::Type{T}) where T<:Microfloat = from_raw_bits(T, 0x00)
 Base.one(::Type{T}) where T<:Microfloat = T(true)
 
 Base.eps(x::Microfloat) = max(x - prevfloat(x), nextfloat(x) - x)
 Base.eps(T::Type{<:Microfloat}) = eps(one(T))
 
-Base.abs(x::T) where T<:Microfloat = reinterpret(T, reinterpret(Unsigned, x) & ~sign_mask(T))
+Base.abs(x::T) where T<:Microfloat = from_raw_bits(T, raw_bits(x) & ~sign_mask(T))
 Base.iszero(x::T) where T<:Microfloat = significand_bits(T) == 0 ? false : abs(x) === zero(T)
 Base.:(-)(x::T) where T<:Microfloat =
     sign_bits(T) == 0 ? throw_negate_unsigned(T, x) :
-    reinterpret(T, sign_mask(T) ⊻ reinterpret(Unsigned, x))
+    from_raw_bits(T, sign_mask(T) ⊻ raw_bits(x))
 Base.Bool(x::T) where T<:Microfloat = iszero(x) ? false : isone(x) ? true : throw(InexactError(:Bool, Bool, x))
 
 Base.precision(::Type{T}) where T<:Microfloat = significand_bits(T) + 1
@@ -182,9 +195,9 @@ for M in (:FromZero, :NearestTiesAway, :NearestTiesUp)
 end
 
 Base.issubnormal(x::T) where T<:Microfloat =
-    0x00 < (reinterpret(Unsigned, x) & ~sign_mask(T)) <= (UInt8(0x01) << significand_bits(T)) - 0x01
+    0x00 < (raw_bits(x) & ~sign_mask(T)) <= (UInt8(0x01) << significand_bits(T)) - 0x01
 
-ispositive(x::T) where T<:Microfloat = iszero(reinterpret(Unsigned, x) & sign_mask(T))
+ispositive(x::T) where T<:Microfloat = iszero(raw_bits(x) & sign_mask(T))
 
 function Base.nextfloat(x::T) where T<:Microfloat
     if isnan(x)
@@ -192,11 +205,13 @@ function Base.nextfloat(x::T) where T<:Microfloat
     elseif isinf(x)
         return ispositive(x) ? inf(T) : -floatmax(T)
     elseif iszero(x)
-        return reinterpret(T, 0x01)
+        return from_raw_bits(T, 0x01)
     elseif ispositive(x)
-        return reinterpret(T, reinterpret(Unsigned, x) + 0x01)
+        # Without Inf, floatmax is as far as it goes, like Inf in Base.
+        !hasinf(T) && raw_bits(x) == raw_bits(floatmax(T)) && return floatmax(T)
+        return from_raw_bits(T, raw_bits(x) + 0x01)
     else
-        return reinterpret(T, reinterpret(Unsigned, x) - 0x01)
+        return from_raw_bits(T, raw_bits(x) - 0x01)
     end
 end
 
@@ -207,13 +222,14 @@ function Base.prevfloat(x::T) where T<:Microfloat
         return ispositive(x) ? floatmax(T) : -inf(T)
     elseif iszero(x)
         sign_bits(T) == 0 && return x
-        return reinterpret(T, sign_mask(T) | 0x01)
+        return from_raw_bits(T, sign_mask(T) | 0x01)
     elseif ispositive(x)
-        raw = reinterpret(Unsigned, x)
+        raw = raw_bits(x)
         raw == 0x00 && sign_bits(T) == 0 && return x
-        return reinterpret(T, raw - 0x01)
+        return from_raw_bits(T, raw - 0x01)
     else
-        return reinterpret(T, reinterpret(Unsigned, x) + 0x01)
+        !hasinf(T) && raw_bits(x) == raw_bits(-floatmax(T)) && return -floatmax(T)
+        return from_raw_bits(T, raw_bits(x) + 0x01)
     end
 end
 

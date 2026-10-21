@@ -41,7 +41,7 @@
 
 using Microfloats
 using Microfloats: Microfloat, cvt, cvt_generic, cvt_twiddle, cvt_lanes,
-                   OverflowPolicy, Saturating, BFloat16, bitwidth,
+                   OverflowPolicy, Saturating, BFloat16, raw_bits, from_raw_bits,
                    throw_negative_unsigned, throw_no_nan,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
                    Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN
@@ -164,18 +164,16 @@ end
 # nibble per lane in a single byte, which is `NVector{T,2}`.
 
 @inline narrow_lanes(::Type{T}, ::Val{false}, bits::UInt16) where T =
-    (reinterpret(T, bits % UInt8), reinterpret(T, (bits >> 8) % UInt8))
+    (from_raw_bits(T, bits % UInt8), from_raw_bits(T, (bits >> 8) % UInt8))
 @inline narrow_lanes(::Type{T}, ::Val{true}, bits::UInt16) where T =
-    (reinterpret(T, (bits % UInt8) & 0x0f), reinterpret(T, (bits % UInt8) >> 4))
+    (from_raw_bits(T, (bits % UInt8) & 0x0f), from_raw_bits(T, (bits % UInt8) >> 4))
 
-# Sources may carry set bits above the format's width (they are ignored by
-# every Microfloats operation), while the hardware requires them to be zero.
-@inline lane_bits(x::T) where T<:Microfloat =
-    reinterpret(UInt8, x) & (0xff >> (8 - bitwidth(T)))
+# `raw_bits` clears any bits above the format's width, which the hardware
+# requires to be zero.
 @inline narrow_pair(::Val{false}, lo::Microfloat, hi::Microfloat) =
-    UInt16(lane_bits(lo)) | (UInt16(lane_bits(hi)) << 8)
+    UInt16(raw_bits(lo)) | (UInt16(raw_bits(hi)) << 8)
 @inline narrow_pair(::Val{true}, lo::Microfloat, hi::Microfloat) =
-    UInt16(lane_bits(lo) | (lane_bits(hi) << 4))
+    UInt16(raw_bits(lo) | (raw_bits(hi) << 4))
 
 const Half = Union{Float16,BFloat16}
 @inline half_pair(lo::H, hi::H) where H<:Half =
