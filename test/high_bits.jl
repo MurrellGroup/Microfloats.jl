@@ -39,9 +39,9 @@ using Microfloats: raw_bits
     end
 end
 
-# Nor do operations ever set them.
+# Nor do operations ever set them, in memory either.
 @testset "Results fit the width" begin
-    fits(y) = reinterpret(UInt8, y) >> bitwidth(typeof(y)) == 0
+    fits(y) = stored(UInt8, y) >> bitwidth(typeof(y)) == 0
     sources = Float32[0, -0.0, 1e-30, -1e-30, 0.3, -0.3, 1, -1, 1e30, -1e30, Inf, -Inf, NaN]
 
     for T in TYPES
@@ -72,5 +72,22 @@ end
     @testset "nextfloat and prevfloat stop at the ends" for T in TYPES
         @test nextfloat(typemax(T)) === typemax(T)
         @test prevfloat(typemin(T)) === typemin(T)
+    end
+end
+
+@testset "Declared width" begin
+    for T in TYPES
+        @test sizeof(T) == 1
+        isdefined(Core, :bitsizeof) && @test Core.bitsizeof(T) == bitwidth(T)
+    end
+
+    # On Julia 1.14 a type narrower than a byte declares only its bits, and
+    # `reinterpret` with UInt8 keeps working for single values.
+    if isdefined(Core, :bitsizeof)
+        x = Float4_E2M1FN(1.5)
+        @test reinterpret(UInt8, x) === 0x03
+        @test reinterpret(Float4_E2M1FN, 0x03) === x
+        @test reinterpret(Float4_E2M1FN, 0xf3) === x
+        @test_throws ArgumentError reinterpret(UInt8, [x])
     end
 end

@@ -4,11 +4,17 @@ import Base: signbit, exponent
     Microfloat <: AbstractFloat
 
 Abstract supertype for byte-sized floating-point numbers. Concrete subtypes
-are 8-bit primitive types declared via [`@microfloat`](@ref).
+are primitive types declared via [`@microfloat`](@ref), one byte each, with
+the value in the low [`bitwidth`](@ref Microfloats.bitwidth) bits.
 
-A type narrower than 8 bits keeps its value in the low bits of the byte.
-Operations ignore the bits above, which `reinterpret` can set, and never set
-them themselves. `===` alone still compares the whole byte.
+On Julia 1.14 and later, a type narrower than 8 bits is declared with its
+real width (`Core.bitsizeof(Float4_E2M1FN) == 4`). Arrays of it can then not
+be reinterpreted, but `reinterpret` between a single value and `UInt8` still
+works, dropping the bits above the width.
+
+Before 1.14 every microfloat is an 8-bit type. Operations ignore the bits
+above the width, which `reinterpret` can set, and never set them themselves.
+`===` alone still compares the whole byte.
 
 # Examples
 ```jldoctest
@@ -27,14 +33,41 @@ significand_mask(::Type{T}) where T<:Microfloat = UInt8(0x01 << significand_bits
 
 value_mask(::Type{T}) where T<:Microfloat = 0xff >> (8 - bitwidth(T))
 
-# A microfloat's value is the low `bitwidth(T)` bits of its byte. The bits
-# above it can be set by `reinterpret(T, ::UInt8)`, so every operation reads
+@static if isdefined(Core, :bitsizeof)
+    # Julia 1.14 lets a primitive type declare fewer bits than it stores, and
+    # `@microfloat` declares a type narrower than a byte with its real width.
+    declared_bits(N::Int) = N
+    has_unused_bits(::Type{T}) where T<:Microfloat = Core.bitsizeof(T) < 8
+else
+    declared_bits(N::Int) = 8
+    has_unused_bits(::Type{<:Microfloat}) = false
+end
+
+# A microfloat's value is the low `bitwidth(T)` bits of its byte. A type that
+# declares only those bits is widened and truncated. In an 8-bit type the bits
+# above can be set by `reinterpret(T, ::UInt8)`, so every operation reads
 # values through `raw_bits`, which ignores them, and builds values through
-# `from_raw_bits` from bits that fit the width.
-raw_bits(x::T) where T<:Microfloat = reinterpret(UInt8, x) & value_mask(T)
-from_raw_bits(::Type{T}, bits::UInt8) where T<:Microfloat = reinterpret(T, bits)
+# `from_raw_bits` from bits that fit the width. Both use intrinsics, because
+# `reinterpret` is defined through them on Julia 1.14.
+@inline function raw_bits(x::T) where T<:Microfloat
+    has_unused_bits(T) && return Core.Intrinsics.zext_int(UInt8, x)
+    return Core.Intrinsics.bitcast(UInt8, x) & value_mask(T)
+end
+@inline function from_raw_bits(::Type{T}, bits::UInt8) where T<:Microfloat
+    has_unused_bits(T) && return Core.Intrinsics.trunc_int(T, bits)
+    return Core.Intrinsics.bitcast(T, bits)
+end
 
 Base.reinterpret(::Type{Unsigned}, x::Microfloat) = raw_bits(x)
+
+@static if isdefined(Core, :bitsizeof)
+    # `reinterpret` refuses a type narrower than its storage. A microfloat's
+    # byte holds its value in the low bits, so these keep the conversions to
+    # and from that byte working. Arrays of such types still cannot be
+    # reinterpreted.
+    Base.reinterpret(::Type{UInt8}, x::Microfloat) = raw_bits(x)
+    Base.reinterpret(::Type{T}, bits::UInt8) where T<:Microfloat = from_raw_bits(T, bits)
+end
 
 signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && !iszero(raw_bits(x) & sign_mask(typeof(x)))
 function exponent(x::T) where T<:Microfloat

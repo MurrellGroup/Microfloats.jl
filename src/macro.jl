@@ -1,10 +1,14 @@
 """
     @microfloat name [kwargs...]
 
-Declare `name` as a new 8-bit primitive subtype of [`Microfloat`](@ref) and
+Declare `name` as a new primitive subtype of [`Microfloat`](@ref) and
 register its layout, non-finite encoding, and *default* overflow policy.
 The default policy is what [`overflow_policy`](@ref) returns; callers
 override per-call with the `overflow=` keyword on the conversion.
+
+The type occupies one byte. On Julia 1.14 and later, a type narrower than
+that is declared with its `sign + exponent + significand` bits; see
+[`Microfloat`](@ref).
 
 Default policy rule: [`OVF`](@ref) when the type has any non-finite
 sentinel ([`IEEE`](@ref) or [`NanOnlyAllOnes`](@ref)), else [`SAT`](@ref)
@@ -87,7 +91,7 @@ macro microfloat(name, kwargs...)
     N = S + E + M
 
     quote
-        Base.@__doc__ primitive type $T <: $Microfloat 8 end
+        Base.@__doc__ primitive type $T <: $Microfloat $(declared_bits(N)) end
         $_validate_microfloat($T, $nonfinite_expr, $overflow_expr)
         $mod.float_bits(::Type{$T}) = ($S, $E, $M)
         $mod.non_finite_behavior(::Type{$T}) = $nonfinite_expr
