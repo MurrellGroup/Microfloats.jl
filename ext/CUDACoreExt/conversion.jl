@@ -41,7 +41,8 @@
 
 using Microfloats
 using Microfloats: Microfloat, cvt, cvt_generic, cvt_twiddle, cvt_lanes,
-                   OverflowPolicy, Saturating, BFloat16, raw_bits, from_raw_bits,
+                   OverflowPolicy, Saturating, BFloat16, NVector,
+                   bitwidth, raw_bits, from_raw_bits,
                    throw_negative_unsigned, throw_no_nan,
                    Float8_E4M3FN, Float8_E5M2, Float8_E8M0FNU,
                    Float6_E2M3FN, Float6_E3M2FN, Float4_E2M1FN
@@ -159,39 +160,37 @@ end
 
 # ───────────────────────── register layouts ──────────────────────────
 
-# A narrow pair register holds lane 1 in its low half. fp8, fp6 and ue8m0
-# pairs take one byte per lane, which is `SVector{2,T}`; an fp4 pair takes one
-# nibble per lane in a single byte, which is `NVector{T,2}`.
+# A pair register holds lane 1 in its low bits. For fp4 (a nibble per lane),
+# fp8 and ue8m0 (a byte per lane) and the 16-bit floats (a half per lane) it is
+# exactly the storage of an `NVector{T,2}`. PTX keeps each 6-bit fp6 lane in a
+# byte of its own, so an fp6 pair is a byte per lane instead.
+@inline dense_pair(::Type{T}) where T = 8 % bitwidth(T) == 0 || bitwidth(T) % 8 == 0
 
-@inline narrow_lanes(::Type{T}, ::Val{false}, bits::UInt16) where T =
-    (from_raw_bits(T, bits % UInt8), from_raw_bits(T, (bits >> 8) % UInt8))
-@inline narrow_lanes(::Type{T}, ::Val{true}, bits::UInt16) where T =
-    (from_raw_bits(T, (bits % UInt8) & 0x0f), from_raw_bits(T, (bits % UInt8) >> 4))
+@inline function pair_lanes(::Type{T}, bits::Unsigned) where T
+    dense_pair(T) && return Tuple(from_raw_bits(NVector{T,2}, bits))
+    return (from_raw_bits(T, bits % UInt8), from_raw_bits(T, (bits >> 8) % UInt8))
+end
 
 # `raw_bits` clears any bits above the format's width, which the hardware
 # requires to be zero.
-@inline narrow_pair(::Val{false}, lo::Microfloat, hi::Microfloat) =
-    UInt16(raw_bits(lo)) | (UInt16(raw_bits(hi)) << 8)
-@inline narrow_pair(::Val{true}, lo::Microfloat, hi::Microfloat) =
-    UInt16(raw_bits(lo) | (raw_bits(hi) << 4))
+@inline function pair_bits(::Type{U}, lo::T, hi::T) where {U<:Unsigned,T}
+    dense_pair(T) && return raw_bits(NVector(lo, hi)) % U
+    return U(raw_bits(lo)) | (U(raw_bits(hi)) << 8)
+end
 
 const Half = Union{Float16,BFloat16}
-@inline half_pair(lo::H, hi::H) where H<:Half =
-    UInt32(reinterpret(UInt16, lo)) | (UInt32(reinterpret(UInt16, hi)) << 16)
-@inline half_lanes(::Type{H}, bits::UInt32) where H<:Half =
-    (reinterpret(H, bits % UInt16), reinterpret(H, (bits >> 16) % UInt16))
 
 # One native pair conversion, as a callable so the lane loops below stay
 # generic: `Narrow` maps two wide lanes to two `T` lanes, `Widen` the reverse.
 struct Narrow{T,instr,nibbles} end
 @inline (::Narrow{T,instr,nibbles})(lo::Float32, hi::Float32) where {T,instr,nibbles} =
-    narrow_lanes(T, Val(nibbles), ptx_cvt_f32(Val(instr), Val(nibbles), lo, hi))
+    pair_lanes(T, ptx_cvt_f32(Val(instr), Val(nibbles), lo, hi))
 @inline (::Narrow{T,instr,nibbles})(lo::H, hi::H) where {T,instr,nibbles,H<:Half} =
-    narrow_lanes(T, Val(nibbles), ptx_cvt_narrow(Val(instr), Val(nibbles), half_pair(lo, hi)))
+    pair_lanes(T, ptx_cvt_narrow(Val(instr), Val(nibbles), pair_bits(UInt32, lo, hi)))
 
 struct Widen{H,instr,nibbles} end
 @inline (::Widen{H,instr,nibbles})(lo::Microfloat, hi::Microfloat) where {H,instr,nibbles} =
-    half_lanes(H, ptx_cvt_widen(Val(instr), Val(nibbles), narrow_pair(Val(nibbles), lo, hi)))
+    pair_lanes(H, ptx_cvt_widen(Val(instr), Val(nibbles), pair_bits(UInt16, lo, hi)))
 
 # N lanes, two at a time. Every pair is converted exactly once: inline asm is
 # opaque to LLVM, so a repeated call would not be merged.
