@@ -131,7 +131,7 @@ end
 @testset "E8M0 at and below its smallest value" begin
     # 2^-127 is a Float32 subnormal and E8M0's smallest value (it has no zero).
     T = Float8_E8M0FNU
-    raw(x, mode) = reinterpret(UInt8, T(x, mode; overflow=SAT))
+    raw(x, mode) = raw_bits(T(x, mode; overflow=SAT))
     for mode in (RoundNearest, RoundNearestTiesAway, RoundToZero, RoundFromZero, RoundUp, RoundDown)
         @test raw(2f0^-127, mode) == 0x00          # exact
         @test raw(2f0^-126, mode) == 0x01          # exact

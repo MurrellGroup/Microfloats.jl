@@ -25,7 +25,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
             pol in (Microfloats.SAT, Microfloats.OVF)
 
             for raw in 0x00:UInt8(2^bitwidth(S) - 1)
-                x = reinterpret(S, raw)
+                x = from_raw_bits(S, raw)
                 a = _cvt_outcome(() -> cvt(T, x, mode, pol))
                 b = _cvt_outcome(() -> cvt_generic(T, Float32(x), mode, pol))
                 a === b || push!(bad, (S, T, raw, mode, pol, a, b))
@@ -40,7 +40,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         Microfloats.@cvt_table UFloat5_E2M3 => Float8_E4M3
         Microfloats.@cvt_table Float8_E4M3 => UFloat5_E2M3
         for raw in 0x00:UInt8(2^bitwidth(UFloat5_E2M3) - 1)
-            x = reinterpret(UFloat5_E2M3, raw)
+            x = from_raw_bits(UFloat5_E2M3, raw)
             @test cvt(Float8_E4M3, x, RoundNearest, Microfloats.SAT) ===
                   cvt_generic(Float8_E4M3, Float32(x), RoundNearest, Microfloats.SAT)
         end
@@ -92,7 +92,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         for S in TYPES, F in (Float16, BFloat16, Float32)
             U = Microfloats.wide_bits(F)
             head = i -> Microfloats.widen_subnormal(F, S, i)
-            table = [reinterpret(U, cvt_generic(F, reinterpret(S, UInt8(r)))) for r in 0:2^bitwidth(S) - 1]
+            table = [reinterpret(U, cvt_generic(F, from_raw_bits(S, UInt8(r)))) for r in 0:2^bitwidth(S) - 1]
             tw = Microfloats.twiddle_fit(table, S, 8 * sizeof(U) - 1;
                                          head = Microfloats.significand_bits(S) > 0 ?
                                                 (2^Microfloats.significand_bits(S), head) : nothing)
@@ -126,7 +126,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
             for (N, U, raws) in ((2, UInt16, 0x0000:0x0fff), (4, UInt32, rand(UInt32, 2^14)),
                                  (8, UInt64, rand(UInt64, 2^12)))
                 for raw in raws
-                    lanes = ntuple(i -> reinterpret(S, (raw >> (8(i - 1))) % UInt8 & mask), N)
+                    lanes = ntuple(i -> from_raw_bits(S, (raw >> (8(i - 1))) % UInt8 & mask), N)
                     xs = NV{S,N}(lanes)
                     a = cvt(NV{T,N}, xs, RoundNearest, Microfloats.SAT)
                     b = ntuple(i -> cvt_generic(T, Float32(lanes[i]), RoundNearest, Microfloats.SAT), N)
@@ -148,7 +148,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         function narrowing_inputs(T)
             xs = Float32[0, -0.0, Inf, -Inf, NaN, -NaN, floatmin(Float32), nextfloat(0f0),
                          prevfloat(floatmin(Float32)), floatmax(Float32)]
-            vals = [Float32(reinterpret(T, UInt8(raw))) for raw in 0:2^bitwidth(T) - 1]
+            vals = [Float32(from_raw_bits(T, UInt8(raw))) for raw in 0:2^bitwidth(T) - 1]
             vals = sort(filter(isfinite, vals))
             for (k, v) in enumerate(vals)
                 w = k < length(vals) ? vals[k + 1] : 2v
@@ -246,7 +246,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
         # exact: every value survives Float16/BFloat16/Float32/Float64 and
         # back, except where Float16's range is too narrow
         for T in TYPES, raw in 0x00:UInt8(2^bitwidth(T) - 1)
-            x = reinterpret(T, raw)
+            x = from_raw_bits(T, raw)
             for F in (BFloat16, Float32, Float64)
                 y = cvt(F, x)
                 @test y isa F
@@ -261,7 +261,7 @@ _cvt_outcome(f) = try f() catch e; (e isa DomainError || e isa ArgumentError) ? 
 
         # vector forms agree with the scalar funnel for every source container
         for T in TYPES_BUILTIN, F in (Float16, BFloat16, Float32, Float64)
-            xs = ntuple(i -> reinterpret(T, UInt8(i * 7 % 2^bitwidth(T))), 4)
+            xs = ntuple(i -> from_raw_bits(T, UInt8(i * 7 % 2^bitwidth(T))), 4)
             want = SVector{4,F}(map(x -> cvt(F, x), xs))
             same(a, b) = all(map((p, q) -> isequal(p, q), Tuple(a), Tuple(b)))
             @test same(cvt(SVector{4,F}, xs), want)

@@ -8,9 +8,10 @@ are primitive types declared via [`@microfloat`](@ref), one byte each, with
 the value in the low [`bitwidth`](@ref Microfloats.bitwidth) bits.
 
 On Julia 1.14 and later, a type narrower than 8 bits is declared with its
-real width (`Core.bitsizeof(Float4_E2M1FN) == 4`). Arrays of it can then not
-be reinterpreted, but `reinterpret` between a single value and `UInt8` still
-works, dropping the bits above the width.
+real width (`Core.bitsizeof(Float4_E2M1FN) == 4`), and `reinterpret` refuses
+to convert it to or from `UInt8`, as Base does for any type narrower than its
+storage. `raw_bits(x)` and `from_raw_bits(T, bits)`, from BitPacking, convert
+between a value and its bits on every version.
 
 Before 1.14 every microfloat is an 8-bit type. Operations ignore the bits
 above the width, which `reinterpret` can set, and never set them themselves.
@@ -45,15 +46,9 @@ end
 # builds values through `from_raw_bits`. On Julia 1.14 a type narrower than a
 # byte has no bits above its width, and those two widen and truncate it.
 
-Base.reinterpret(::Type{Unsigned}, x::Microfloat) = raw_bits(x)
-
-@static if isdefined(Core, :bitsizeof)
-    # `reinterpret` refuses a type narrower than its storage. A microfloat's
-    # byte holds its value in the low bits, so these keep the conversions to
-    # and from that byte working. Arrays of such types still cannot be
-    # reinterpreted.
-    Base.reinterpret(::Type{UInt8}, x::Microfloat) = raw_bits(x)
-    Base.reinterpret(::Type{T}, bits::UInt8) where T<:Microfloat = from_raw_bits(T, bits)
+function Base.reinterpret(::Type{Unsigned}, x::Microfloat)
+    Base.depwarn("`reinterpret(Unsigned, x)` for a microfloat is deprecated, use `raw_bits(x)` instead.", :reinterpret)
+    return raw_bits(x)
 end
 
 signbit(x::Microfloat) = sign_bits(typeof(x)) > 0 && !iszero(raw_bits(x) & sign_mask(typeof(x)))
