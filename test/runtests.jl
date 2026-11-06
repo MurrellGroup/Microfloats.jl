@@ -1,6 +1,6 @@
 using Microfloats
 using Microfloats: non_finite_behavior, hasinf, hasnan, inf, nan,
-                   sign_bits, bitwidth, overflow_policy,
+                   sign_bits, bitwidth, raw_bits, from_raw_bits, overflow_policy,
                    IEEE, NanOnlyAllOnes, FiniteOnly,
                    OverflowPolicy, SAT, OVF,
                    @microfloat

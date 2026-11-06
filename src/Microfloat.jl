@@ -31,32 +31,19 @@ sign_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << sign_bits(T) - 0x01) <
 exponent_mask(::Type{T}) where T<:Microfloat = UInt8((0x01 << exponent_bits(T) - 0x01) << significand_bits(T))
 significand_mask(::Type{T}) where T<:Microfloat = UInt8(0x01 << significand_bits(T) - 0x01)
 
-value_mask(::Type{T}) where T<:Microfloat = 0xff >> (8 - bitwidth(T))
-
 @static if isdefined(Core, :bitsizeof)
     # Julia 1.14 lets a primitive type declare fewer bits than it stores, and
     # `@microfloat` declares a type narrower than a byte with its real width.
     declared_bits(N::Int) = N
-    has_unused_bits(::Type{T}) where T<:Microfloat = Core.bitsizeof(T) < 8
 else
     declared_bits(N::Int) = 8
-    has_unused_bits(::Type{<:Microfloat}) = false
 end
 
-# A microfloat's value is the low `bitwidth(T)` bits of its byte. A type that
-# declares only those bits is widened and truncated. In an 8-bit type the bits
-# above can be set by `reinterpret(T, ::UInt8)`, so every operation reads
-# values through `raw_bits`, which ignores them, and builds values through
-# `from_raw_bits` from bits that fit the width. Both use intrinsics, because
-# `reinterpret` is defined through them on Julia 1.14.
-@inline function raw_bits(x::T) where T<:Microfloat
-    has_unused_bits(T) && return Core.Intrinsics.zext_int(UInt8, x)
-    return Core.Intrinsics.bitcast(UInt8, x) & value_mask(T)
-end
-@inline function from_raw_bits(::Type{T}, bits::UInt8) where T<:Microfloat
-    has_unused_bits(T) && return Core.Intrinsics.trunc_int(T, bits)
-    return Core.Intrinsics.bitcast(T, bits)
-end
+# A microfloat's value is the low `bitwidth(T)` bits of its byte. In an 8-bit
+# type the bits above can be set by `reinterpret(T, ::UInt8)`, so every
+# operation reads values through BitPacking's `raw_bits`, which clears them, and
+# builds values through `from_raw_bits`. On Julia 1.14 a type narrower than a
+# byte has no bits above its width, and those two widen and truncate it.
 
 Base.reinterpret(::Type{Unsigned}, x::Microfloat) = raw_bits(x)
 

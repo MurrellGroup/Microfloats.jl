@@ -12,7 +12,7 @@
 
     f4 = Microfloats.Float4x2_E2M1FN((Float4_E2M1FN(1), Float4_E2M1FN(2)))
     @test bitwidth(f4) == 8
-    @test reinterpret(UInt8, f4) ==
+    @test raw_bits(f4) ==
           (reinterpret(UInt8, Float4_E2M1FN(1)) |
            (reinterpret(UInt8, Float4_E2M1FN(2)) << 4))
 

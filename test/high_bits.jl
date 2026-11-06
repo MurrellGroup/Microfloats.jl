@@ -1,5 +1,3 @@
-using Microfloats: raw_bits
-
 # Bits above a type's width, which `reinterpret` can set, must not change any
 # result, nor reach the bits of one.
 @testset "Bits above the width" begin
