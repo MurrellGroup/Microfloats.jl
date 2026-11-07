@@ -29,7 +29,7 @@
         used_mask = Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T)
         @testset "round-trip" for u in 0x00:0xff
             (u & ~used_mask) != 0x00 && continue
-            x = reinterpret(T, u)
+            x = from_raw_bits(T, u)
             isnan(x) && continue
             @test T(BFloat16(x)) ≡ x
             @test T(Float32(x)) ≡ x
@@ -51,7 +51,7 @@ end
         used_mask = Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T)
         for u in 0x00:0xff
             (u & ~used_mask) != 0x00 && continue
-            x = reinterpret(T, u)
+            x = from_raw_bits(T, u)
             (isnan(x) || isinf(x)) && continue
             s = Microfloats.decimal_string(x)
             @test T(parse(Float64, s)) === x
@@ -107,7 +107,7 @@ end
 @testset "NanOnlyAllOnes types: no Inf" begin
     @testset "$T" for T in (Float8_E4M3FN, Float8_E8M0FNU)
         for u in 0x00:0xff
-            @test !isinf(reinterpret(T, u))
+            @test !isinf(from_raw_bits(T, u))
         end
         @test_throws DomainError inf(T)
         @test isnan(nan(T))
@@ -117,7 +117,7 @@ end
 @testset "FiniteOnly types: no Inf or NaN" begin
     @testset "$T" for T in (Float4_E2M1FN, Float6_E2M3FN, Float6_E3M2FN)
         for u in 0x00:0xff
-            x = reinterpret(T, u)
+            x = from_raw_bits(T, u)
             @test !isinf(x)
             @test !isnan(x)
         end
@@ -189,7 +189,7 @@ end
     # normals: matches Base.exponent on the round-tripped value
     @testset "$T normals" for T in (Float8_E3M4, Float8_E4M3, Float8_E5M2, Float8_E4M3FN)
         for u in 0x01:0xff
-            x = reinterpret(T, u)
+            x = from_raw_bits(T, u)
             (isnan(x) || isinf(x) || iszero(x) || issubnormal(x)) && continue
             @test exponent(x) == exponent(Float64(x))
         end

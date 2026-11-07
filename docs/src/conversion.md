@@ -107,9 +107,9 @@ destinations of any length:
 
 ```julia
 # Float4_E2M1FN => Float8_E4M3FN, any rounding mode and overflow policy
-i = reinterpret(UInt8, x) & 0x07
+i = raw_bits(x) & 0x07
 t = ifelse(i >= 0x02, (i << 2) + 0x30, ifelse(i >= 0x01, (i << 3) + 0x28, 0x00))
-t |= (reinterpret(UInt8, x) & 0x08) << 4
+t |= (raw_bits(x) & 0x08) << 4
 ```
 
 Everything else is a lookup. [`Microfloats.max_twiddle_cost`](@ref) sets the

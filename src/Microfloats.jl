@@ -2,7 +2,7 @@ module Microfloats
 
 using Republic
 
-@republic import BitPacking: bitwidth
+@republic import BitPacking: bitwidth, raw_bits, from_raw_bits
 @republic import BFloat16s: BFloat16
 
 include("utils.jl")

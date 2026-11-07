@@ -1,6 +1,6 @@
 name = "Microfloats"
 uuid = "31c70f10-a750-4521-b13c-797315ae2933"
-version = "0.2.8"
+version = "0.2.9"
 authors = ["Anton Oresten <antonoresten@gmail.com> and contributors"]
 
 [workspace]
@@ -23,7 +23,7 @@ cuDNNExt = "cuDNN"
 
 [compat]
 BFloat16s = "0.5, 0.6"
-BitPacking = "0.2"
+BitPacking = "0.3"
 CUDACore = "6"
 Random = "1"
 Republic = "2.1"

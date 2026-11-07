@@ -12,7 +12,7 @@ using CUDACore
 using CUDACore: CuArray, @cuda
 using Microfloats: cvt, cvt_generic, bitwidth
 
-samebits(xs, ys) = reinterpret.(UInt8, xs) == reinterpret.(UInt8, ys)
+samebits(xs, ys) = raw_bits.(xs) == raw_bits.(ys)
 sametuples(xs, ys) = Tuple.(xs) == Tuple.(ys)
 
 gpu_broadcast(::Type{T}, xs) where T = Array(T.(CuArray(xs)))
@@ -108,7 +108,7 @@ svector4(::Type{T}, a, b, c, d) where T =
         @testset "microfloat → microfloat, every bit pattern" begin
             bad = []
             for S in SCALAR_TARGETS, T in SCALAR_TARGETS, pol in (Microfloats.SAT, Microfloats.OVF)
-                xs = reinterpret.(S, UInt8.(0:2^bitwidth(S) - 1))
+                xs = from_raw_bits.(S, UInt8.(0:2^bitwidth(S) - 1))
                 expected = try
                     T.(xs; overflow=pol)
                 catch
@@ -126,7 +126,7 @@ svector4(::Type{T}, a, b, c, d) where T =
         @testset "Float32 narrowing at every boundary" begin
             bad = []
             for T in SCALAR_TARGETS
-                vals = sort(filter(isfinite, [Float32(reinterpret(T, UInt8(r))) for r in 0:2^bitwidth(T) - 1]))
+                vals = sort(filter(isfinite, [Float32(from_raw_bits(T, UInt8(r))) for r in 0:2^bitwidth(T) - 1]))
                 xs = Float32[Inf, 0]
                 for (k, v) in enumerate(vals)
                     w = k < length(vals) ? vals[k + 1] : 2v
@@ -254,7 +254,7 @@ svector4(::Type{T}, a, b, c, d) where T =
             # Every representable value, the midpoints between neighbours
             # (ties), their float neighbours, and out-of-range magnitudes.
             function probes(::Type{T}, ::Type{S}) where {T,S}
-                vals = sort!(unique!(filter(isfinite, Float32.(reinterpret.(T, 0x00:UInt8(2^bitwidth(T) - 1))))))
+                vals = sort!(unique!(filter(isfinite, Float32.(from_raw_bits.(T, 0x00:UInt8(2^bitwidth(T) - 1))))))
                 mids = S.((vals[1:end-1] .+ vals[2:end]) ./ 2)
                 # (including Float32 subnormals, below even E8M0's 2^-127)
                 edge = S.(Float32[Float32(floatmax(T)) * 1.01f0, Float32(floatmax(T)) * 4, 1f30, Inf32, -0.0f0,
@@ -295,7 +295,7 @@ svector4(::Type{T}, a, b, c, d) where T =
                 (Float8_E8M0FNU, (Microfloats.BFloat16, Float32)),
             )
             for (T, destinations) in widening, F in destinations
-                xs = reinterpret.(T, 0x00:UInt8(2^bitwidth(T) - 1))
+                xs = from_raw_bits.(T, 0x00:UInt8(2^bitwidth(T) - 1))
                 ys = reverse(xs)
                 quads = [Microfloats.SVector{4,T}(a, b, b, a) for (a, b) in zip(xs, ys)]
                 packed = [Microfloats.NVector{T,2}((a, b)) for (a, b) in zip(xs, ys)]

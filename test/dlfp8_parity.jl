@@ -12,7 +12,7 @@ import DLFP8Types
         (Microfloats.Float8_E5M2,   DLFP8Types.Float8_E5M2),
     )
         for i in 0x00:0xff
-            mx = reinterpret(M_T, i)
+            mx = from_raw_bits(M_T, i)
             dx = reinterpret(D_T, i)
             @test Float32(mx) ≡ Float32(dx)
             @test isinf(mx) == isinf(dx)

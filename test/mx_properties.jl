@@ -2,7 +2,7 @@
     for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1, MX_E8M0)
         @testset "$T no isinf()" begin
             for u in 0x00:0xff
-                @test !isinf(reinterpret(T, u))
+                @test !isinf(from_raw_bits(T, u))
             end
         end
     end
@@ -20,7 +20,7 @@ end
         for s in (0x00, sm)
             for mv in 0x00:maxm
                 m = mv & mm
-                x = reinterpret(T, (s & sm) | em | m)
+                x = from_raw_bits(T, (s & sm) | em | m)
                 if m == mm
                     @test isnan(x)
                 else
@@ -41,7 +41,7 @@ end
             for s in (0x00, sm)
                 for mv in 0x00:maxm
                     m = mv & mm
-                    x = reinterpret(T, (s & sm) | em | m)
+                    x = from_raw_bits(T, (s & sm) | em | m)
                     @test isfinite(x)
                     @test !isnan(x)
                 end
@@ -52,9 +52,9 @@ end
     # E8M0: 0xff is NaN
     @testset "E8M0" begin
         T = MX_E8M0
-        @test isnan(reinterpret(T, 0xff))
-        @test !isnan(reinterpret(T, 0x00))
-        @test !isfinite(reinterpret(T, 0xff))
+        @test isnan(from_raw_bits(T, 0xff))
+        @test !isnan(from_raw_bits(T, 0x00))
+        @test !isfinite(from_raw_bits(T, 0xff))
     end
 end
 
@@ -64,7 +64,7 @@ end
             used_mask = Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T)
             for u in 0x00:0xff
                 (u & ~used_mask) != 0x00 && continue
-                x = reinterpret(T, u)
+                x = from_raw_bits(T, u)
                 y = T(Float32(x))
                 @test y ≡ x
             end
@@ -119,7 +119,7 @@ end
     for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1)
         @testset "$T subnormal min value" begin
             if Microfloats.significand_bits(T) > 0
-                x = reinterpret(T, 0x01)
+                x = from_raw_bits(T, 0x01)
                 expected = Float32(2.0)^(1 - Microfloats.exponent_bias(T) - Microfloats.significand_bits(T))
                 @test Float32(x) == expected
             end
@@ -128,8 +128,8 @@ end
     for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1)
         @testset "$T signed zeros" begin
             if Microfloats.sign_bits(T) == 1
-                zp = reinterpret(T, 0x00)
-                zn = reinterpret(T, Microfloats.sign_mask(T))
+                zp = from_raw_bits(T, 0x00)
+                zn = from_raw_bits(T, Microfloats.sign_mask(T))
                 @test iszero(zp)
                 @test iszero(zn)
                 @test zp == zn
@@ -146,7 +146,7 @@ end
 @testset "MX: equality and Bool semantics" begin
     for T in (MX_E4M3, MX_E3M2, MX_E2M3, MX_E2M1)
         @testset "$T" begin
-            x = reinterpret(T, 0x01)
+            x = from_raw_bits(T, 0x01)
             @test x != -x
             @test Bool(zero(T)) == false
             @test Bool(one(T)) == true
@@ -155,13 +155,13 @@ end
     end
     @testset "E4M3 NaN equality" begin
         T = MX_E4M3
-        x = reinterpret(T, Microfloats.exponent_mask(T) | Microfloats.significand_mask(T))
+        x = from_raw_bits(T, Microfloats.exponent_mask(T) | Microfloats.significand_mask(T))
         @test isnan(x)
         @test !(x == x)
     end
     @testset "E8M0 NaN equality" begin
         T = MX_E8M0
-        x = reinterpret(T, 0xff)
+        x = from_raw_bits(T, 0xff)
         @test isnan(x)
         @test !(x == x)
     end
@@ -172,7 +172,7 @@ end
         @testset "$T" begin
             vals = Tuple{UInt8,Float32,Any}[]
             for u in 0x00:0xff
-                x = reinterpret(T, u)
+                x = from_raw_bits(T, u)
                 isnan(x) && continue
                 # Only include canonical encodings: padding bits outside fields are zero
                 used_mask = UInt8(Microfloats.sign_mask(T) | Microfloats.exponent_mask(T) | Microfloats.significand_mask(T))

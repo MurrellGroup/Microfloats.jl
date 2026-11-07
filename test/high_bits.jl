@@ -1,19 +1,18 @@
-using Microfloats: raw_bits
-
-# Bits above a type's width, which `reinterpret` can set, must not change any
-# result, nor reach the bits of one.
+# Bits above a type's width, which `reinterpret` can set in an 8-bit type, must
+# not change any result, nor reach the bits of one. On Julia 1.14 a type
+# narrower than a byte declares only its bits, so it has none above them.
 @testset "Bits above the width" begin
     same(a, b) = raw_bits(a) === raw_bits(b)
 
     for T in TYPES
         N = bitwidth(T)
         N == 8 && continue
+        isdefined(Core, :bitsizeof) && Core.bitsizeof(T) < 8 && continue
         for raw in 0x00:UInt8(2^N - 1), high in (0x01, 0xff)
-            x = reinterpret(T, raw)
+            x = from_raw_bits(T, raw)
             y = reinterpret(T, raw | (high << N))
 
             @test raw_bits(y) === raw
-            @test reinterpret(Unsigned, y) === raw
             @test repr(y) == repr(x)
 
             @test isnan(y) == isnan(x)
@@ -39,9 +38,9 @@ using Microfloats: raw_bits
     end
 end
 
-# Nor do operations ever set them.
+# Nor do operations ever set them, in memory either.
 @testset "Results fit the width" begin
-    fits(y) = reinterpret(UInt8, y) >> bitwidth(typeof(y)) == 0
+    fits(y) = stored(UInt8, y) >> bitwidth(typeof(y)) == 0
     sources = Float32[0, -0.0, 1e-30, -1e-30, 0.3, -0.3, 1, -1, 1e30, -1e30, Inf, -Inf, NaN]
 
     for T in TYPES
@@ -51,7 +50,7 @@ end
             @test fits(f(T))
         end
         for raw in 0x00:UInt8(2^N - 1)
-            x = reinterpret(T, raw)
+            x = from_raw_bits(T, raw)
             @test fits(abs(x))
             sign_bits(T) == 1 && @test fits(-x)
             @test fits(nextfloat(x))
@@ -73,4 +72,30 @@ end
         @test nextfloat(typemax(T)) === typemax(T)
         @test prevfloat(typemin(T)) === typemin(T)
     end
+end
+
+@testset "Declared width" begin
+    for T in TYPES
+        @test sizeof(T) == 1
+        isdefined(Core, :bitsizeof) && @test Core.bitsizeof(T) == bitwidth(T)
+    end
+
+    # `raw_bits` and `from_raw_bits` convert between a value and its bits on
+    # every version, ignoring the bits above the width.
+    x = Float4_E2M1FN(1.5)
+    @test raw_bits(x) === 0x03
+    @test from_raw_bits(Float4_E2M1FN, 0x03) === x
+    @test from_raw_bits(Float4_E2M1FN, 0xf3) === x
+
+    # On Julia 1.14 a type narrower than a byte declares only its bits, and
+    # `reinterpret` refuses it, as Base does.
+    if isdefined(Core, :bitsizeof)
+        @test_throws ErrorException reinterpret(UInt8, x)
+        @test_throws ErrorException reinterpret(Float4_E2M1FN, 0x03)
+        @test_throws ArgumentError reinterpret(UInt8, [x])
+    end
+end
+
+@testset "Deprecated reinterpret(Unsigned, x)" begin
+    @test (@test_deprecated reinterpret(Unsigned, Float4_E2M1FN(1.5))) === 0x03
 end

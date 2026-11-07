@@ -1,6 +1,6 @@
 using Microfloats
 using Microfloats: non_finite_behavior, hasinf, hasnan, inf, nan,
-                   sign_bits, bitwidth, overflow_policy,
+                   sign_bits, bitwidth, raw_bits, from_raw_bits, overflow_policy,
                    IEEE, NanOnlyAllOnes, FiniteOnly,
                    OverflowPolicy, SAT, OVF,
                    @microfloat
@@ -13,6 +13,13 @@ using BFloat16s: BFloat16
 # round-trip tests can treat distinct NaN encodings as equivalent without
 # losing the bit-identity semantics for signed zeros.
 ≡(a, b) = isnan(a) || isnan(b) ? isnan(a) && isnan(b) : a == b
+
+# The bytes of `x` as stored in memory, read as a `U`. Unlike `reinterpret`,
+# this also works for types narrower than their storage on Julia 1.14.
+function stored(::Type{U}, x) where U
+    r = Ref(x)
+    return GC.@preserve r unsafe_load(Ptr{U}(Base.unsafe_convert(Ptr{typeof(x)}, r)))
+end
 
 # variants used only for tests
 @microfloat UFloat7_E3M4  sign=0 exponent=3 significand=4
